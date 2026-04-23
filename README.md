@@ -14,6 +14,7 @@
 - 增加了 `/status` `/branch` `/diff` `/history`，终于能看见自己做了什么
 - 增加了 `/summary` 和 `/commit`，可以回看本轮成果并直接提交
 - 仓库现在有 [HARNESS.md](HARNESS.md) 和 [CHANGELOG.md](CHANGELOG.md)，方便 agent 继承规则和回看成长史
+- 仓库现在还有 [way-to-claw-code.md](way-to-claw-code.md)，用于记录长期路线图和后续待办
 - 自带 `.vscode` 配置，可以在 VS Code 里一键启动 `jarvis`
 - REPL 现在有启动 banner、Git 状态头和动态提示符，更接近真正的 CLI 工具
 - 增加了 `edit_file` 工具和 `/patch` 命令，可以做局部编辑并直接预览改动

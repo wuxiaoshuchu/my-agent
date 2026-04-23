@@ -15,6 +15,7 @@
 - patch 审批现在会显示更像 TUI 的终端状态面板，包含文件、增删统计、逐段进度和动作提示。
 - patch 审批现在支持单键操作，不需要每次输入后再按回车。
 - `WorkspaceInspector` 现在拆成了独立模块，并对高频 Git 状态查询增加了轻量缓存。
+- 新增 `way-to-claw-code.md` 长期路线图，并在 `HARNESS.md` 中挂上入口，方便后续 agent 在上下文压缩后继续推进。
 - 新增 `/patch [path]` 命令，可以在 REPL 里直接看当前 patch。
 - 补充测试，覆盖局部编辑、多 hunk patch、逐段审批、终端审批面板、单键提示、Git 状态缓存和 untracked 文件预览。
 
@@ -27,11 +28,13 @@
 - 让终端审批体验更像一个真正的开发工具界面，而不是简单的 `input()` 问答。
 - 让高频 patch 审批动作更顺手，减少确认时的操作摩擦。
 - 让 `agent.py` 的职责更集中，也减少 REPL 高频显示场景下重复拉起 Git 子进程的次数。
+- 让项目的长期方向从“只存在聊天里”变成“存在仓库里”，方便未来每一轮按路线图推进。
 
 ### 验证
 
 - `python3 -m unittest discover -s tests`
 - `jarvis --help`
+- 文档一致性检查：`HARNESS.md` / `README.md` / `way-to-claw-code.md`
 
 ### 增加启动 banner、状态头和动态提示符
 
