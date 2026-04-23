@@ -15,6 +15,7 @@ MAX_FILE_PREVIEW_CHARS = 12000
 MAX_PATCH_PREVIEW_CHARS = 4000
 MAX_CONFIRM_PREVIEW_CHARS = 2000
 MAX_FULL_PATCH_DISPLAY_CHARS = 12000
+PATCH_REVIEW_PANEL_WIDTH = 78
 DEFAULT_LIST_LIMIT = 200
 DEFAULT_GREP_LIMIT = 50
 MAX_TEXT_FILE_SIZE = 512 * 1024
@@ -83,6 +84,91 @@ def _looks_dangerous_command(cmd: str) -> bool:
         r"\bmkfs\b",
     ]
     return any(re.search(pattern, cmd) for pattern in patterns)
+
+
+def _supports_color(stream=None) -> bool:
+    stream = stream or sys.stdout
+    return bool(getattr(stream, "isatty", None) and stream.isatty())
+
+
+def _style_text(text: str, *, color: str, use_color: bool) -> str:
+    if not use_color:
+        return text
+    color_map = {
+        "red": "\033[31m",
+        "green": "\033[32m",
+        "yellow": "\033[33m",
+        "cyan": "\033[36m",
+        "bold": "\033[1m",
+        "dim": "\033[2m",
+    }
+    prefix = color_map.get(color)
+    if not prefix:
+        return text
+    return f"{prefix}{text}\033[0m"
+
+
+def _format_patch_diff(diff: str, *, use_color: bool) -> str:
+    lines = []
+    for line in diff.splitlines():
+        if line.startswith("@@") or line.startswith("+++") or line.startswith("---"):
+            lines.append(_style_text(line, color="cyan", use_color=use_color))
+        elif line.startswith("+") and not line.startswith("+++"):
+            lines.append(_style_text(line, color="green", use_color=use_color))
+        elif line.startswith("-") and not line.startswith("---"):
+            lines.append(_style_text(line, color="red", use_color=use_color))
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _count_patch_stats(diff: str) -> tuple[int, int, int]:
+    additions = 0
+    deletions = 0
+    hunks = 0
+    for line in diff.splitlines():
+        if line.startswith("@@"):
+            hunks += 1
+        elif line.startswith("+") and not line.startswith("+++"):
+            additions += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            deletions += 1
+    return additions, deletions, hunks
+
+
+def _render_panel(title: str, rows: list[str], *, width: int = PATCH_REVIEW_PANEL_WIDTH) -> str:
+    content_width = max(20, width - 4)
+
+    def fit(line: str) -> str:
+        if len(line) > content_width:
+            return line[: content_width - 3] + "..."
+        return line
+
+    border = "+" + "-" * (content_width + 2) + "+"
+    lines = [border, f"| {fit(f'[ {title} ]').ljust(content_width)} |"]
+    for row in rows:
+        lines.append(f"| {fit(row).ljust(content_width)} |")
+    lines.append(border)
+    return "\n".join(lines)
+
+
+def _render_patch_review_screen(
+    title: str,
+    rel_path: str,
+    diff: str,
+    *,
+    preview_label: str,
+    meta_lines: list[str],
+) -> str:
+    additions, deletions, diff_hunks = _count_patch_stats(diff)
+    rows = [
+        f"file: {rel_path}",
+        f"delta: +{additions} / -{deletions} | diff hunks: {diff_hunks}",
+        *meta_lines,
+    ]
+    panel = _render_panel(title, rows)
+    body = _format_patch_diff(diff, use_color=_supports_color())
+    return f"{panel}\n{preview_label}\n{body}"
 
 
 @dataclass
@@ -519,11 +605,30 @@ class ToolRuntime:
             rel,
             existed_before=existed_before,
         )
-        preview = f"写入文件: {rel}\n\n[patch preview before apply]\n{patch}"
+        preview = _render_patch_review_screen(
+            "Write File Review",
+            rel,
+            patch,
+            preview_label="[patch preview before apply]",
+            meta_lines=[
+                f"mode: {'create' if not existed_before else 'overwrite'}",
+                "actions: y apply | p full patch | n cancel",
+            ],
+        )
+        full_preview_screen = _render_patch_review_screen(
+            "Write File Review",
+            rel,
+            full_patch,
+            preview_label="[patch preview before apply]",
+            meta_lines=[
+                f"mode: {'create' if not existed_before else 'overwrite'}",
+                "actions: y apply | p full patch | n cancel",
+            ],
+        )
         if not self._confirm(
             "write_file",
             preview,
-            full_preview=full_patch,
+            full_preview=full_preview_screen,
             accept_label="应用这个 patch",
         ):
             return f"DENIED: 用户拒绝写入 {rel}"
@@ -576,11 +681,31 @@ class ToolRuntime:
             rel,
             existed_before=True,
         )
-        preview = f"编辑文件: {rel}\n\n[patch preview before apply]\n{patch}"
+        mode_text = "replace_all" if replace_all else "single replace"
+        preview = _render_patch_review_screen(
+            "Edit File Review",
+            rel,
+            patch,
+            preview_label="[patch preview before apply]",
+            meta_lines=[
+                f"mode: {mode_text}",
+                "actions: y apply | p full patch | n cancel",
+            ],
+        )
+        full_preview_screen = _render_patch_review_screen(
+            "Edit File Review",
+            rel,
+            full_patch,
+            preview_label="[patch preview before apply]",
+            meta_lines=[
+                f"mode: {mode_text}",
+                "actions: y apply | p full patch | n cancel",
+            ],
+        )
         if not self._confirm(
             "edit_file",
             preview,
-            full_preview=full_patch,
+            full_preview=full_preview_screen,
             accept_label="应用这个 patch",
         ):
             return f"DENIED: 用户拒绝编辑 {rel}"
@@ -628,12 +753,40 @@ class ToolRuntime:
             rel,
             existed_before=True,
         )
-        preview = f"应用 patch: {rel}\n\n[patch preview before apply]\n{patch}"
+        allow_hunk_review = len(normalized_edits) > 1
+        preview = _render_patch_review_screen(
+            "Patch Review",
+            rel,
+            patch,
+            preview_label="[patch preview before apply]",
+            meta_lines=[
+                f"planned edits: {len(normalized_edits)}",
+                (
+                    "actions: y apply all | h review hunks | p full patch | n cancel"
+                    if allow_hunk_review
+                    else "actions: y apply | p full patch | n cancel"
+                ),
+            ],
+        )
+        full_preview_screen = _render_patch_review_screen(
+            "Patch Review",
+            rel,
+            full_patch,
+            preview_label="[patch preview before apply]",
+            meta_lines=[
+                f"planned edits: {len(normalized_edits)}",
+                (
+                    "actions: y apply all | h review hunks | p full patch | n cancel"
+                    if allow_hunk_review
+                    else "actions: y apply | p full patch | n cancel"
+                ),
+            ],
+        )
         decision = self._choose_patch_apply_mode(
             "apply_patch",
             preview,
-            full_preview=full_patch,
-            allow_hunk_review=len(normalized_edits) > 1,
+            full_preview=full_preview_screen,
+            allow_hunk_review=allow_hunk_review,
         )
         if decision == "deny":
             return f"DENIED: 用户拒绝应用 patch 到 {rel}"
@@ -679,9 +832,25 @@ class ToolRuntime:
                 rel,
                 existed_before=True,
             )
-            hunk_preview = (
-                f"应用 patch 第 {index}/{len(normalized_edits)} 段: {rel}\n\n"
-                f"[patch hunk preview]\n{hunk_patch}"
+            hunk_preview = _render_patch_review_screen(
+                f"Patch Hunk {index}/{len(normalized_edits)}",
+                rel,
+                hunk_patch,
+                preview_label="[patch hunk preview]",
+                meta_lines=[
+                    f"progress: accepted {accepted_hunks} | skipped {skipped_hunks} | remaining {len(normalized_edits) - index + 1}",
+                    "actions: y apply | s skip | a apply rest | p full hunk | q stop",
+                ],
+            )
+            hunk_full_preview = _render_patch_review_screen(
+                f"Patch Hunk {index}/{len(normalized_edits)}",
+                rel,
+                hunk_full_patch,
+                preview_label="[patch hunk preview]",
+                meta_lines=[
+                    f"progress: accepted {accepted_hunks} | skipped {skipped_hunks} | remaining {len(normalized_edits) - index + 1}",
+                    "actions: y apply | s skip | a apply rest | p full hunk | q stop",
+                ],
             )
             if apply_remaining:
                 hunk_decision = "apply"
@@ -691,7 +860,7 @@ class ToolRuntime:
                     index,
                     len(normalized_edits),
                     hunk_preview,
-                    full_preview=hunk_full_patch,
+                    full_preview=hunk_full_preview,
                 )
 
             if hunk_decision == "stop":

@@ -118,7 +118,9 @@ class ToolRuntimeTests(unittest.TestCase):
         self.assertIn("OK:", result)
         self.assertIsNotNone(runtime.last_confirmation)
         _, preview, full_preview, accept_label = runtime.last_confirmation
+        self.assertIn("[ Write File Review ]", preview)
         self.assertIn("[patch preview before apply]", preview)
+        self.assertIn("actions: y apply | p full patch | n cancel", preview)
         self.assertIn("+++ b/notes/demo.txt", preview)
         self.assertIn("+++ b/notes/demo.txt", full_preview or "")
         self.assertIn("应用这个 patch", accept_label)
@@ -131,7 +133,9 @@ class ToolRuntimeTests(unittest.TestCase):
         self.assertIn("OK: 已编辑", result)
         self.assertIsNotNone(runtime.last_confirmation)
         _, preview, full_preview, _ = runtime.last_confirmation
+        self.assertIn("[ Edit File Review ]", preview)
         self.assertIn("[patch preview before apply]", preview)
+        self.assertIn("mode: single replace", preview)
         self.assertIn("-print('hello')", preview)
         self.assertIn("+print('patched')", preview)
         self.assertIn("+print('patched')", full_preview or "")
@@ -165,7 +169,10 @@ class ToolRuntimeTests(unittest.TestCase):
         self.assertIsNotNone(runtime.last_patch_plan)
         action, preview, full_preview, allow_hunk_review = runtime.last_patch_plan
         self.assertEqual(action, "apply_patch")
+        self.assertIn("[ Patch Review ]", preview)
         self.assertIn("[patch preview before apply]", preview)
+        self.assertIn("planned edits: 2", preview)
+        self.assertIn("actions: y apply all | h review hunks | p full patch | n cancel", preview)
         self.assertIn("-alpha", preview)
         self.assertIn("+ALPHA", preview)
         self.assertIn("+GAMMA", full_preview or "")
@@ -191,7 +198,9 @@ class ToolRuntimeTests(unittest.TestCase):
         self.assertIn("gamma", content)
         self.assertNotIn("GAMMA", content)
         self.assertEqual(len(runtime.hunk_reviews), 2)
+        self.assertIn("[ Patch Hunk 1/2 ]", runtime.hunk_reviews[0][2])
         self.assertIn("[patch hunk preview]", runtime.hunk_reviews[0][2])
+        self.assertIn("progress: accepted 0 | skipped 0 | remaining 2", runtime.hunk_reviews[0][2])
 
     def test_apply_patch_can_skip_every_hunk(self):
         self.runtime.write_file("src/app.py", "alpha\nbeta\ngamma\n")
@@ -211,6 +220,23 @@ class ToolRuntimeTests(unittest.TestCase):
         content = self.runtime.read_file("src/app.py")
         self.assertIn("alpha", content)
         self.assertIn("gamma", content)
+
+    def test_apply_patch_hunk_preview_updates_progress(self):
+        self.runtime.write_file("src/app.py", "alpha\nbeta\ngamma\n")
+        runtime = CapturingToolRuntime(self.workspace)
+        runtime.patch_mode = "review_hunks"
+        runtime.hunk_actions = ["apply", "apply"]
+
+        runtime.apply_patch(
+            "src/app.py",
+            [
+                {"old_text": "alpha", "new_text": "ALPHA"},
+                {"old_text": "gamma", "new_text": "GAMMA"},
+            ],
+        )
+
+        self.assertEqual(len(runtime.hunk_reviews), 2)
+        self.assertIn("progress: accepted 1 | skipped 0 | remaining 1", runtime.hunk_reviews[1][2])
 
 
 if __name__ == "__main__":

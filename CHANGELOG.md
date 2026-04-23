@@ -12,8 +12,9 @@
 - `write_file`、`edit_file` 和 `apply_patch` 现在在真正应用之前也会先展示 `patch preview before apply`。
 - patch 类审批交互现在支持 `y / p / n`，可以更明确地接受、查看或取消 patch。
 - 多 hunk patch 现在支持先看总 patch，再逐段接受、跳过或提前结束审批。
+- patch 审批现在会显示更像 TUI 的终端状态面板，包含文件、增删统计、逐段进度和动作提示。
 - 新增 `/patch [path]` 命令，可以在 REPL 里直接看当前 patch。
-- 补充测试，覆盖局部编辑、多 hunk patch、逐段审批、patch 预览和 untracked 文件预览。
+- 补充测试，覆盖局部编辑、多 hunk patch、逐段审批、终端审批面板和 untracked 文件预览。
 
 ### 为什么这样改
 
@@ -21,6 +22,7 @@
 - 让用户不仅知道 agent 做了动作，还能看见具体改动内容。
 - 让代码修改过程更可观察，也更适合之后继续加审批或应用 patch 的工作流。
 - 让 patch 审批不再只能整份通过或整份取消，而是可以更细颗粒度地控制。
+- 让终端审批体验更像一个真正的开发工具界面，而不是简单的 `input()` 问答。
 
 ### 验证
 
