@@ -17,7 +17,7 @@
 - 自带 `.vscode` 配置，可以在 VS Code 里一键启动 `jarvis`
 - REPL 现在有启动 banner、Git 状态头和动态提示符，更接近真正的 CLI 工具
 - 增加了 `edit_file` 工具和 `/patch` 命令，可以做局部编辑并直接预览改动
-- 增加了 `apply_patch` 工具，并且 patch 类修改现在支持更明确的 `y / p / n` 审批交互
+- 增加了 `apply_patch` 工具，并且多 hunk patch 现在支持先看总览、再逐段接受或跳过
 
 ## 前置条件
 
@@ -143,10 +143,18 @@ python agent.py
   - agent 做了哪些动作
   - 每次动作具体改了哪些代码
 - 现在编辑工具在真正写入前也会先展示 `patch preview before apply`，你确认后才会落盘
-- 对 patch 类修改，现在会提示：
-  - `y`：应用 patch
+- 对多 hunk patch，现在会先提示：
+  - `y`：一次性应用全部 patch
+  - `h`：进入逐段审批
   - `p`：查看更完整的 patch
   - `n`：取消
+- 进入逐段审批后，每一段 hunk 都可以：
+  - `y`：应用这段
+  - `s`：跳过这段
+  - `a`：应用这段和剩余 hunk
+  - `p`：查看这一段更完整的 patch
+  - `q`：结束审批并保留已经接受的改动
+- 逐段审批是按顺序计算的，后续 hunk 会基于当前已经接受的结果继续判断是否还能应用
 
 常用方式：
 

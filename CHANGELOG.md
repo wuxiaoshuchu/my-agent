@@ -11,14 +11,16 @@
 - `write_file` 和 `edit_file` 现在都会返回 `patch preview`，直接显示改了哪些行。
 - `write_file`、`edit_file` 和 `apply_patch` 现在在真正应用之前也会先展示 `patch preview before apply`。
 - patch 类审批交互现在支持 `y / p / n`，可以更明确地接受、查看或取消 patch。
+- 多 hunk patch 现在支持先看总 patch，再逐段接受、跳过或提前结束审批。
 - 新增 `/patch [path]` 命令，可以在 REPL 里直接看当前 patch。
-- 补充测试，覆盖局部编辑、多 hunk patch、patch 预览和 untracked 文件预览。
+- 补充测试，覆盖局部编辑、多 hunk patch、逐段审批、patch 预览和 untracked 文件预览。
 
 ### 为什么这样改
 
 - 让 `jarvis` 从“只能整文件写入”走向更像真正的编码助手。
 - 让用户不仅知道 agent 做了动作，还能看见具体改动内容。
 - 让代码修改过程更可观察，也更适合之后继续加审批或应用 patch 的工作流。
+- 让 patch 审批不再只能整份通过或整份取消，而是可以更细颗粒度地控制。
 
 ### 验证
 

@@ -321,6 +321,132 @@ class ToolRuntime:
                 continue
             print("请输入 y / p / n")
 
+    def _choose_patch_apply_mode(
+        self,
+        action: str,
+        preview: str,
+        *,
+        full_preview: str,
+        allow_hunk_review: bool,
+    ) -> str:
+        if self.auto_approve:
+            return "apply_all"
+
+        if not sys.stdin.isatty():
+            return "deny"
+
+        print(f"\n[permission] {action}")
+        print(_truncate(preview, limit=MAX_CONFIRM_PREVIEW_CHARS))
+
+        if not allow_hunk_review:
+            while True:
+                answer = input(
+                    "输入 y 应用这个 patch，p 查看完整 patch，n 取消: "
+                ).strip().lower()
+                if answer in {"y", "yes"}:
+                    return "apply_all"
+                if answer in {"", "n", "no"}:
+                    return "deny"
+                if answer == "p":
+                    print("\n[full patch preview]")
+                    print(_truncate(full_preview, limit=MAX_FULL_PATCH_DISPLAY_CHARS))
+                    continue
+                print("请输入 y / p / n")
+
+        while True:
+            answer = input(
+                "输入 y 全部应用，h 逐段选择，p 查看完整 patch，n 取消: "
+            ).strip().lower()
+            if answer in {"y", "yes"}:
+                return "apply_all"
+            if answer in {"h", "review"}:
+                return "review_hunks"
+            if answer in {"", "n", "no"}:
+                return "deny"
+            if answer == "p":
+                print("\n[full patch preview]")
+                print(_truncate(full_preview, limit=MAX_FULL_PATCH_DISPLAY_CHARS))
+                continue
+            print("请输入 y / h / p / n")
+
+    def _choose_patch_hunk_action(
+        self,
+        rel_path: str,
+        hunk_index: int,
+        total_hunks: int,
+        preview: str,
+        *,
+        full_preview: str,
+    ) -> str:
+        if self.auto_approve:
+            return "apply"
+
+        if not sys.stdin.isatty():
+            return "skip"
+
+        print(f"\n[patch hunk {hunk_index}/{total_hunks}] {rel_path}")
+        print(_truncate(preview, limit=MAX_CONFIRM_PREVIEW_CHARS))
+
+        while True:
+            answer = input(
+                "输入 y 应用这段，s 跳过，a 应用这段和剩余，p 查看完整 hunk，q 结束并保留已接受内容: "
+            ).strip().lower()
+            if answer in {"y", "yes"}:
+                return "apply"
+            if answer in {"", "s", "skip"}:
+                return "skip"
+            if answer in {"a", "all"}:
+                return "apply_rest"
+            if answer in {"q", "quit"}:
+                return "stop"
+            if answer == "p":
+                print("\n[full hunk preview]")
+                print(_truncate(full_preview, limit=MAX_FULL_PATCH_DISPLAY_CHARS))
+                continue
+            print("请输入 y / s / a / p / q")
+
+    def _normalize_patch_edits(self, edits: list[dict]) -> list[dict[str, str | bool]]:
+        if not edits:
+            raise ValueError("edits 不能为空")
+
+        normalized: list[dict[str, str | bool]] = []
+        for index, edit in enumerate(edits, start=1):
+            if not isinstance(edit, dict):
+                raise ValueError(f"patch 第 {index} 项不是对象")
+            old_text = edit.get("old_text")
+            new_text = edit.get("new_text")
+            replace_all = bool(edit.get("replace_all", False))
+            if not isinstance(old_text, str) or not isinstance(new_text, str):
+                raise ValueError(f"patch 第 {index} 项缺少合法的 old_text/new_text")
+            normalized.append(
+                {
+                    "old_text": old_text,
+                    "new_text": new_text,
+                    "replace_all": replace_all,
+                }
+            )
+        return normalized
+
+    def _apply_patch_edits(
+        self,
+        content: str,
+        edits: list[dict[str, str | bool]],
+    ) -> tuple[str, int]:
+        updated = content
+        total_replacements = 0
+        for index, edit in enumerate(edits, start=1):
+            try:
+                updated, replaced = self._replace_exact(
+                    updated,
+                    old_text=str(edit["old_text"]),
+                    new_text=str(edit["new_text"]),
+                    replace_all=bool(edit["replace_all"]),
+                )
+            except ValueError as exc:
+                raise ValueError(f"patch 第 {index} 项失败: {exc}") from exc
+            total_replacements += replaced
+        return updated, total_replacements
+
     def _replace_exact(
         self,
         content: str,
@@ -479,29 +605,14 @@ class ToolRuntime:
         except UnicodeDecodeError:
             return f"ERROR: 目标文件不是 UTF-8 文本: {_relative_display(file_path, self.workspace_root)}"
 
-        if not edits:
-            return "ERROR: edits 不能为空"
-
-        updated = original
-        total_replacements = 0
-        for index, edit in enumerate(edits, start=1):
-            if not isinstance(edit, dict):
-                return f"ERROR: patch 第 {index} 项不是对象"
-            old_text = edit.get("old_text")
-            new_text = edit.get("new_text")
-            replace_all = bool(edit.get("replace_all", False))
-            if not isinstance(old_text, str) or not isinstance(new_text, str):
-                return f"ERROR: patch 第 {index} 项缺少合法的 old_text/new_text"
-            try:
-                updated, replaced = self._replace_exact(
-                    updated,
-                    old_text=old_text,
-                    new_text=new_text,
-                    replace_all=replace_all,
-                )
-            except ValueError as exc:
-                return f"ERROR: patch 第 {index} 项失败: {exc}"
-            total_replacements += replaced
+        try:
+            normalized_edits = self._normalize_patch_edits(edits)
+            updated, total_replacements = self._apply_patch_edits(
+                original,
+                normalized_edits,
+            )
+        except ValueError as exc:
+            return f"ERROR: {exc}"
 
         rel = _relative_display(file_path, self.workspace_root)
         full_patch = _build_patch_preview(
@@ -518,19 +629,115 @@ class ToolRuntime:
             existed_before=True,
         )
         preview = f"应用 patch: {rel}\n\n[patch preview before apply]\n{patch}"
-        if not self._confirm(
+        decision = self._choose_patch_apply_mode(
             "apply_patch",
             preview,
             full_preview=full_patch,
-            accept_label="应用这个 patch",
-        ):
-            return f"DENIED: 用户拒绝应用 patch 到 {rel}"
-
-        file_path.write_text(updated, encoding="utf-8")
-        return (
-            f"OK: 已对 {rel} 应用 {len(edits)} 个 patch hunk，替换 {total_replacements} 处匹配\n\n"
-            f"[patch preview]\n{patch}"
+            allow_hunk_review=len(normalized_edits) > 1,
         )
+        if decision == "deny":
+            return f"DENIED: 用户拒绝应用 patch 到 {rel}"
+        if decision == "apply_all":
+            file_path.write_text(updated, encoding="utf-8")
+            return (
+                f"OK: 已对 {rel} 应用 {len(normalized_edits)} 个 patch hunk，替换 {total_replacements} 处匹配\n\n"
+                f"[patch preview]\n{patch}"
+            )
+
+        current = original
+        accepted_hunks = 0
+        skipped_hunks = 0
+        total_replacements = 0
+        apply_remaining = False
+        notes: list[str] = []
+
+        for index, edit in enumerate(normalized_edits, start=1):
+            try:
+                candidate, replaced = self._replace_exact(
+                    current,
+                    old_text=str(edit["old_text"]),
+                    new_text=str(edit["new_text"]),
+                    replace_all=bool(edit["replace_all"]),
+                )
+            except ValueError as exc:
+                skipped_hunks += 1
+                notes.append(
+                    f"第 {index} 段在当前内容下无法应用，已跳过: {exc}"
+                )
+                continue
+
+            hunk_full_patch = _build_patch_preview(
+                current,
+                candidate,
+                rel,
+                existed_before=True,
+                limit=None,
+            )
+            hunk_patch = _build_patch_preview(
+                current,
+                candidate,
+                rel,
+                existed_before=True,
+            )
+            hunk_preview = (
+                f"应用 patch 第 {index}/{len(normalized_edits)} 段: {rel}\n\n"
+                f"[patch hunk preview]\n{hunk_patch}"
+            )
+            if apply_remaining:
+                hunk_decision = "apply"
+            else:
+                hunk_decision = self._choose_patch_hunk_action(
+                    rel,
+                    index,
+                    len(normalized_edits),
+                    hunk_preview,
+                    full_preview=hunk_full_patch,
+                )
+
+            if hunk_decision == "stop":
+                remaining = len(normalized_edits) - index + 1
+                skipped_hunks += remaining
+                notes.append(
+                    f"用户在第 {index} 段结束逐段审批，剩余 {remaining} 个 hunk 已跳过"
+                )
+                break
+            if hunk_decision == "skip":
+                skipped_hunks += 1
+                continue
+
+            current = candidate
+            accepted_hunks += 1
+            total_replacements += replaced
+            if hunk_decision == "apply_rest":
+                apply_remaining = True
+
+        if accepted_hunks == 0:
+            lines = [f"DENIED: 用户没有应用 {rel} 的任何 patch hunk"]
+            if notes:
+                lines.extend(["", "[patch notes]"])
+                lines.extend(f"- {note}" for note in notes)
+            return "\n".join(lines)
+
+        final_patch = _build_patch_preview(
+            original,
+            current,
+            rel,
+            existed_before=True,
+        )
+        file_path.write_text(current, encoding="utf-8")
+
+        summary = (
+            f"OK: 已对 {rel} 选择性应用 {accepted_hunks}/{len(normalized_edits)} 个 patch hunk，"
+            f"替换 {total_replacements} 处匹配"
+        )
+        if skipped_hunks:
+            summary += f"，跳过 {skipped_hunks} 个"
+
+        lines = [summary, "", "[patch preview]", final_patch]
+        if notes:
+            lines.extend(["", "[patch notes]"])
+            lines.extend(f"- {note}" for note in notes)
+        return "\n".join(lines)
 
     def list_files(self, path: str = ".", glob: str = "**/*", limit: int = DEFAULT_LIST_LIMIT) -> str:
         try:

@@ -17,6 +17,10 @@ class CapturingToolRuntime(ToolRuntime):
         super().__init__(workspace_root, auto_approve=False, command_timeout=5)
         self.allow = allow
         self.last_confirmation: tuple[str, str, str | None, str] | None = None
+        self.last_patch_plan: tuple[str, str, str, bool] | None = None
+        self.patch_mode = "apply_all"
+        self.hunk_actions: list[str] = []
+        self.hunk_reviews: list[tuple[int, int, str, str]] = []
 
     def _confirm(
         self,
@@ -28,6 +32,33 @@ class CapturingToolRuntime(ToolRuntime):
     ) -> bool:
         self.last_confirmation = (action, preview, full_preview, accept_label)
         return self.allow
+
+    def _choose_patch_apply_mode(
+        self,
+        action: str,
+        preview: str,
+        *,
+        full_preview: str,
+        allow_hunk_review: bool,
+    ) -> str:
+        self.last_patch_plan = (action, preview, full_preview, allow_hunk_review)
+        if not self.allow:
+            return "deny"
+        return self.patch_mode
+
+    def _choose_patch_hunk_action(
+        self,
+        rel_path: str,
+        hunk_index: int,
+        total_hunks: int,
+        preview: str,
+        *,
+        full_preview: str,
+    ) -> str:
+        self.hunk_reviews.append((hunk_index, total_hunks, preview, full_preview))
+        if self.hunk_actions:
+            return self.hunk_actions.pop(0)
+        return "apply" if self.allow else "skip"
 
 
 class ToolRuntimeTests(unittest.TestCase):
@@ -131,14 +162,55 @@ class ToolRuntimeTests(unittest.TestCase):
         )
 
         self.assertIn("OK: 已对 src/app.py 应用 2 个 patch hunk", result)
-        self.assertIsNotNone(runtime.last_confirmation)
-        action, preview, full_preview, accept_label = runtime.last_confirmation
+        self.assertIsNotNone(runtime.last_patch_plan)
+        action, preview, full_preview, allow_hunk_review = runtime.last_patch_plan
         self.assertEqual(action, "apply_patch")
         self.assertIn("[patch preview before apply]", preview)
         self.assertIn("-alpha", preview)
         self.assertIn("+ALPHA", preview)
         self.assertIn("+GAMMA", full_preview or "")
-        self.assertEqual(accept_label, "应用这个 patch")
+        self.assertTrue(allow_hunk_review)
+
+    def test_apply_patch_can_review_hunks_individually(self):
+        self.runtime.write_file("src/app.py", "alpha\nbeta\ngamma\n")
+        runtime = CapturingToolRuntime(self.workspace)
+        runtime.patch_mode = "review_hunks"
+        runtime.hunk_actions = ["apply", "skip"]
+
+        result = runtime.apply_patch(
+            "src/app.py",
+            [
+                {"old_text": "alpha", "new_text": "ALPHA"},
+                {"old_text": "gamma", "new_text": "GAMMA"},
+            ],
+        )
+
+        self.assertIn("OK: 已对 src/app.py 选择性应用 1/2 个 patch hunk", result)
+        content = self.runtime.read_file("src/app.py")
+        self.assertIn("ALPHA", content)
+        self.assertIn("gamma", content)
+        self.assertNotIn("GAMMA", content)
+        self.assertEqual(len(runtime.hunk_reviews), 2)
+        self.assertIn("[patch hunk preview]", runtime.hunk_reviews[0][2])
+
+    def test_apply_patch_can_skip_every_hunk(self):
+        self.runtime.write_file("src/app.py", "alpha\nbeta\ngamma\n")
+        runtime = CapturingToolRuntime(self.workspace)
+        runtime.patch_mode = "review_hunks"
+        runtime.hunk_actions = ["skip", "skip"]
+
+        result = runtime.apply_patch(
+            "src/app.py",
+            [
+                {"old_text": "alpha", "new_text": "ALPHA"},
+                {"old_text": "gamma", "new_text": "GAMMA"},
+            ],
+        )
+
+        self.assertIn("DENIED: 用户没有应用 src/app.py 的任何 patch hunk", result)
+        content = self.runtime.read_file("src/app.py")
+        self.assertIn("alpha", content)
+        self.assertIn("gamma", content)
 
 
 if __name__ == "__main__":
