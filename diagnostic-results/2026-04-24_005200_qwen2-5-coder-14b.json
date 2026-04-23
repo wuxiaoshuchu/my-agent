@@ -1,0 +1,81 @@
+{
+  "model": "qwen2.5-coder:14b",
+  "workspace_root": "/Users/wuxiaoshuchu/Documents/Codex/2026-04-23-claude-code-agent-api-api-gpu/my-agent-14b",
+  "started_at": "2026-04-24T00:41:17",
+  "finished_at": "2026-04-24T00:52:00",
+  "short_timeout_s": 20,
+  "long_timeout_s": 120,
+  "results": [
+    {
+      "case_id": "ollama_ps_before",
+      "status": "ok",
+      "duration_ms": 457,
+      "summary": "returncode=0",
+      "detail": "NAME    ID    SIZE    PROCESSOR    CONTEXT    UNTIL"
+    },
+    {
+      "case_id": "api_version",
+      "status": "ok",
+      "duration_ms": 13,
+      "summary": "HTTP request completed",
+      "detail": "{\"version\":\"0.21.0\"}"
+    },
+    {
+      "case_id": "api_tags",
+      "status": "ok",
+      "duration_ms": 9,
+      "summary": "HTTP request completed",
+      "detail": "{\"models\":[{\"name\":\"qwen2.5-coder:14b\",\"model\":\"qwen2.5-coder:14b\",\"modified_at\":\"2026-04-24T00:38:52.770424348+09:00\",\"size\":8988124298,\"digest\":\"9ec8897f747e246e970bc5cfdda85d22f1123dc2e3d34978a010a75968716849\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"qwen2\",\"families\":[\"qwen2\"],\"parameter_size\":\"14.8B\",\"quantization_level\":\"Q4_K_M\"}},{\"name\":\"qwen2.5-coder:7b\",\"model\":\"qwen2.5-coder:7b\",\"modified_at\":\"2026-04-23T03:18:28.651906218+09:00\",\"size\":4683087561,\"digest\":\"dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"qwen2\",\"families\":[\"qwen2\"],\"parameter_size\":\"7.6B\",\"quantization_level\":\"Q4_K_M\"}}]}"
+    },
+    {
+      "case_id": "direct_chat_minimal",
+      "status": "ok",
+      "duration_ms": 89105,
+      "summary": "HTTP request completed",
+      "detail": "{\"model\":\"qwen2.5-coder:14b\",\"created_at\":\"2026-04-23T15:42:47.545802Z\",\"message\":{\"role\":\"assistant\",\"content\":\"OK\"},\"done\":true,\"done_reason\":\"stop\",\"total_duration\":88944204583,\"load_duration\":71054799458,\"prompt_eval_count\":34,\"prompt_eval_duration\":13261054208,\"eval_count\":2,\"eval_duration\":2978787125}"
+    },
+    {
+      "case_id": "openai_minimal",
+      "status": "ok",
+      "duration_ms": 10484,
+      "summary": "content='OK'",
+      "detail": "{\n  \"id\": \"chatcmpl-845\",\n  \"choices\": [\n    {\n      \"finish_reason\": \"stop\",\n      \"index\": 0,\n      \"logprobs\": null,\n      \"message\": {\n        \"content\": \"OK\",\n        \"refusal\": null,\n        \"role\": \"assistant\",\n        \"annotations\": null,\n        \"audio\": null,\n        \"function_call\": null,\n        \"tool_calls\": null\n      }\n    }\n  ],\n  \"created\": 1776958974,\n  \"model\": \"qwen2.5-coder:14b\",\n  \"object\": \"chat.completion\",\n  \"service_tier\": null,\n  \"system_fingerprint\": \"fp_ollama\",\n  \"usage\": {\n    \"completion_tokens\": 2,\n    \"prompt_tokens\": 34,\n    \"total_tokens\": 36,\n    \"completion_tokens_details\": null,\n    \"prompt_tokens_details\": null\n  }\n}"
+    },
+    {
+      "case_id": "openai_agent_quick_prompt",
+      "status": "timeout",
+      "duration_ms": 20808,
+      "summary": "APITimeoutError: Request timed out.",
+      "detail": ""
+    },
+    {
+      "case_id": "agent_runtime_defaults_short",
+      "status": "timeout",
+      "duration_ms": 23521,
+      "summary": "APITimeoutError: Request timed out.",
+      "detail": ""
+    },
+    {
+      "case_id": "agent_runtime_defaults_long",
+      "status": "timeout",
+      "duration_ms": 283170,
+      "summary": "APITimeoutError: Request timed out.",
+      "detail": ""
+    },
+    {
+      "case_id": "ollama_ps_after",
+      "status": "ok",
+      "duration_ms": 209483,
+      "summary": "returncode=0",
+      "detail": "NAME    ID    SIZE    PROCESSOR    CONTEXT    UNTIL"
+    }
+  ],
+  "summary": {
+    "case_count": 9,
+    "ok_cases": 6,
+    "timeout_cases": 3,
+    "error_cases": 0,
+    "total_duration_ms": 637050
+  },
+  "root_cause": "真实 agent 任务在当前超时阈值下会超时，优先检查模型延迟和超时设置。"
+}

@@ -270,6 +270,8 @@ jarvis --model qwen2.5-coder:14b
 /model set qwen2.5-coder:14b
 ```
 
+不过基于当前这台 `M1 + 16GB` 机器的真实结果，`qwen2.5-coder:14b` 现在不建议直接设成默认模型。更具体的结论已经写在 [model-baseline.md](model-baseline.md)。
+
 如果换成别的 OpenAI 兼容服务，也可以改：
 
 ```bash
@@ -325,6 +327,14 @@ jarvis \
 当前首份真实结果已经在：
 
 - [benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.md)
+- [benchmark-results/2026-04-24_005305_qwen2-5-coder-14b.md](/Users/wuxiaoshuchu/Desktop/my-agent/benchmark-results/2026-04-24_005305_qwen2-5-coder-14b.md)
+
+当前最重要的对比结论是：
+
+- `7b` 在 `20s` benchmark 下会超时，但在更长超时里至少能完成真实 agent 任务
+- `14b` 在这台机器上的直连延迟波动很大：warm 大约 `3.9s`，冷态样本到过 `40s`
+- `14b` 带完整 `jarvis` prompt + tools 时，长任务有时要 `169s` 才能完成，有时只吐一个 fake tool call
+- 所以当前不建议把默认模型切到 `14b`
 
 ## 运行时诊断
 
@@ -345,3 +355,8 @@ python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b
 - 同一个真实 agent 任务在短超时和长超时下的表现
 
 结果会写到 `diagnostic-results/`，方便以后回看“到底是运行时坏了，还是模型太慢，还是 agent prompt/tool 形态触发了延迟”。
+
+当前已经有两份官方诊断结果：
+
+- [diagnostic-results/2026-04-24_001108_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_001108_qwen2-5-coder-7b.md)
+- [diagnostic-results/2026-04-24_010457_qwen2-5-coder-14b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_010457_qwen2-5-coder-14b.md)

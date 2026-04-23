@@ -2,6 +2,29 @@
 
 按时间倒序记录这个仓库的重要迭代，方便回看成长过程、理解每一轮为什么改、出了什么成果。
 
+## 2026-04-24
+
+### 补齐 14b 基线，并把本机默认模型建议收紧回 7b
+
+- 跑完 `qwen2.5-coder:14b` 的官方 benchmark 和 runtime diagnostics，并把结果落进 [benchmark-results/](benchmark-results/) 和 [diagnostic-results/](diagnostic-results/)。
+- 更新 [model-baseline.md](model-baseline.md)、[README.md](README.md)、[way-to-claw-code.md](way-to-claw-code.md)，把 `7b vs 14b` 的真实对比写回仓库。
+- 更新 [runtime_diagnostics.py](runtime_diagnostics.py)，让诊断器能识别“大模型在本机冷启动和 agent prompt 下整体过慢”的模式。
+- 更新 [scripts/diagnose_runtime.py](scripts/diagnose_runtime.py)，给 `ollama ps` 这类子进程加默认超时，避免诊断脚本自己被运行时拖死。
+- 补充 [tests/test_runtime_diagnostics.py](tests/test_runtime_diagnostics.py)，覆盖新的根因推断分支。
+
+### 为什么这样改
+
+- 这轮最关键的价值不是“把 14b 装上了”，而是确认了它在这台 `M1 + 16GB` 机器上并不适合作为默认本地模型。
+- 现在我们对本机模型选择不再只靠直觉，而是已经有了 `7b` 和 `14b` 的真实对比。
+- 也顺手把诊断工具链补强了，避免以后排查时被 `ollama ps` 这种慢子进程反过来卡住。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `python3 -u scripts/benchmark_agent.py --models qwen2.5-coder:14b --max-turns 3 --request-timeout 20`
+- `python3 scripts/diagnose_runtime.py --model qwen2.5-coder:14b`
+- `./.venv/bin/jarvis --help`
+
 ## 2026-04-23
 
 ### 增加运行时诊断脚本，并定位 7b 超时根因

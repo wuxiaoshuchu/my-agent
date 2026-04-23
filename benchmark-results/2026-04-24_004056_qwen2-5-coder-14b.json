@@ -1,0 +1,88 @@
+{
+  "model": "qwen2.5-coder:14b",
+  "base_url": "http://localhost:11434/v1",
+  "num_ctx": 16384,
+  "workspace_root": "/Users/wuxiaoshuchu/Documents/Codex/2026-04-23-claude-code-agent-api-api-gpu/my-agent-14b",
+  "tasks_file": "/Users/wuxiaoshuchu/Documents/Codex/2026-04-23-claude-code-agent-api-api-gpu/my-agent-14b/benchmarks/agent_tasks.json",
+  "started_at": "2026-04-24T00:40:54",
+  "finished_at": "2026-04-24T00:40:56",
+  "total_duration_ms": 2152,
+  "task_results": [
+    {
+      "task_id": "runtime_defaults",
+      "description": "读取默认运行时配置并说出关键字段。",
+      "duration_ms": 1177,
+      "passed": false,
+      "checks_passed": 0,
+      "total_checks": 3,
+      "missing_checks": [
+        "qwen2.5-coder:7b",
+        "http://localhost:11434/v1",
+        "16384"
+      ],
+      "tool_calls": 0,
+      "tool_names": [],
+      "final_output": "",
+      "error": "APIConnectionError: Connection error."
+    },
+    {
+      "task_id": "model_subcommands",
+      "description": "确认 /model 支持的子命令。",
+      "duration_ms": 13,
+      "passed": false,
+      "checks_passed": 0,
+      "total_checks": 3,
+      "missing_checks": [
+        "use",
+        "set",
+        "ctx"
+      ],
+      "tool_calls": 0,
+      "tool_names": [],
+      "final_output": "",
+      "error": "APIConnectionError: Connection error."
+    },
+    {
+      "task_id": "p1_context_engine",
+      "description": "总结路线图里的 P1 重点。",
+      "duration_ms": 16,
+      "passed": false,
+      "checks_passed": 0,
+      "total_checks": 3,
+      "missing_checks": [
+        "compact",
+        "memory",
+        "/compact"
+      ],
+      "tool_calls": 0,
+      "tool_names": [],
+      "final_output": "",
+      "error": "APIConnectionError: Connection error."
+    },
+    {
+      "task_id": "p0_runtime_files",
+      "description": "识别 P0 运行时配置相关文件。",
+      "duration_ms": 12,
+      "passed": false,
+      "checks_passed": 0,
+      "total_checks": 3,
+      "missing_checks": [
+        "jarvis.config.json",
+        "runtime_config.py",
+        "model-baseline.md"
+      ],
+      "tool_calls": 0,
+      "tool_names": [],
+      "final_output": "",
+      "error": "APIConnectionError: Connection error."
+    }
+  ],
+  "summary": {
+    "model": "qwen2.5-coder:14b",
+    "task_count": 4,
+    "passed_tasks": 0,
+    "pass_rate": "0/4",
+    "average_duration_ms": 304,
+    "total_duration_ms": 2152
+  }
+}

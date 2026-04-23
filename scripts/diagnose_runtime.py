@@ -68,7 +68,12 @@ def parse_script_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def run_subprocess_case(case_id: str, command: list[str]) -> DiagnosticCaseResult:
+def run_subprocess_case(
+    case_id: str,
+    command: list[str],
+    *,
+    timeout_s: int = 15,
+) -> DiagnosticCaseResult:
     start = time.perf_counter()
     try:
         result = subprocess.run(
@@ -76,6 +81,16 @@ def run_subprocess_case(case_id: str, command: list[str]) -> DiagnosticCaseResul
             capture_output=True,
             text=True,
             check=False,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        return DiagnosticCaseResult(
+            case_id=case_id,
+            status="timeout",
+            duration_ms=duration_ms,
+            summary=f"subprocess timed out after {timeout_s}s",
+            detail=(exc.stdout or exc.stderr or "").strip(),
         )
     except OSError as exc:
         duration_ms = int((time.perf_counter() - start) * 1000)

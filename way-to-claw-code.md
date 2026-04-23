@@ -72,9 +72,9 @@
 
 ### 当前模型建议
 
-- 日常默认优先尝试：`qwen2.5-coder:14b`
-- 长上下文备选：`deepseek-coder-v2:16b`
-- 小模型 baseline：`qwen2.5-coder:7b`
+- 当前仓库默认继续保持：`qwen2.5-coder:7b`
+- 下一位候选：`deepseek-coder-v2:16b`
+- 已确认不适合作为这台机器默认本地模型：`qwen2.5-coder:14b`
 - 暂不建议作为主力本地模型：`qwen3-coder:30b`
   - 原因：你的机器是 `M1 + 16GB`，这类 `19GB` 级模型对日常本地使用太吃紧
 
@@ -89,6 +89,13 @@
   - 最小直连和最小 OpenAI 兼容请求都能秒级返回
   - 慢点主要出现在 `qwen2.5-coder:7b` 处理真实 agent 任务时的首轮工具规划
   - 同一个任务在 `120s` 超时下可以完成，说明更像“太慢”而不是“完全坏了”
+- `qwen2.5-coder:14b` 这轮也已经补了真实对比：
+  - benchmark 仍然是 `0/4`
+  - 最小直连 `api/chat` 在 warm/cold 状态下波动很大，大约 `3.9s - 40.7s`
+  - 最小 OpenAI 兼容请求大约 `3.2s - 3.8s`
+  - 带完整 `jarvis` prompt + tools 的 quick prompt 在 `20s` 下超时
+  - 同一个真实 agent 任务也不稳定：一次整轮大约 `169s` 才完成，另一次只输出 fake tool call
+  - 这说明 `14b` 在这台机器上仍然不适合作为默认本地模型
 
 ### 完成标准
 
@@ -237,7 +244,7 @@
 如果未来 agent 重新进入这个仓库，不知道先做什么，默认先做下面这 3 件事中的第 1 件：
 
 - [ ] 根据这轮诊断结果，决定是先调 `timeout / warmup / prompt`，还是直接换默认模型
-- [ ] 用 benchmark 脚手架继续补数据，比较 `qwen2.5-coder:7b / 14b` 与 `deepseek-coder-v2:16b`
+- [ ] 用 benchmark 脚手架继续补数据，比较 `qwen2.5-coder:7b` 与 `deepseek-coder-v2:16b`
 - [ ] 给 `jarvis` 增加最小 `compact` 机制设计草案
 
 ## 不要误判的事情

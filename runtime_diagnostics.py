@@ -46,8 +46,46 @@ def infer_root_cause(run: DiagnosticRun) -> str:
     by_id = {result.case_id: result for result in run.results}
     direct = by_id.get("direct_chat_minimal")
     openai_minimal = by_id.get("openai_minimal")
+    quick_agent = by_id.get("openai_agent_quick_prompt")
     short_case = by_id.get("agent_runtime_defaults_short")
     long_case = by_id.get("agent_runtime_defaults_long")
+
+    if (
+        direct
+        and direct.status == "ok"
+        and direct.duration_ms >= 60_000
+        and openai_minimal
+        and openai_minimal.status == "ok"
+        and quick_agent
+        and quick_agent.status == "timeout"
+        and long_case
+        and long_case.status == "timeout"
+    ):
+        return (
+            f"当前模型 `{run.model}` 在这台机器上的冷启动和首 token 成本已经过高："
+            "最小直连请求都接近 1 分钟以上，带完整 `jarvis` prompt + tools 的请求"
+            "在 120 秒下仍会超时。对这台 `M1 + 16GB` 机器来说，它暂时不适合作为"
+            "默认本地模型。"
+        )
+
+    if (
+        direct
+        and direct.status == "ok"
+        and direct.duration_ms >= 30_000
+        and openai_minimal
+        and openai_minimal.status == "ok"
+        and quick_agent
+        and quick_agent.status == "timeout"
+        and short_case
+        and short_case.status == "timeout"
+        and long_case
+        and long_case.status == "ok"
+    ):
+        return (
+            f"当前模型 `{run.model}` 在这台机器上可以跑通真实 agent 任务，但冷启动和首轮工具决策"
+            "明显偏慢：最小直连请求已经到几十秒量级，真实 agent 任务整轮时间也会远超"
+            " `20s` benchmark 的阈值。它更适合作为实验模型，不适合作为默认本地模型。"
+        )
 
     if (
         direct
@@ -61,7 +99,7 @@ def infer_root_cause(run: DiagnosticRun) -> str:
     ):
         return (
             "Ollama 服务本身是健康的，瓶颈主要出现在 `jarvis` 风格 prompt + tools 下的"
-            "首轮工具决策延迟；当前 20 秒超时对 qwen2.5-coder:7b 太紧。"
+            "首轮工具决策延迟；当前 20 秒超时对当前模型太紧。"
         )
 
     if direct and direct.status != "ok":

@@ -69,6 +69,44 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.assertIn("## Root Cause", markdown)
         self.assertEqual(summary["timeout_cases"], 1)
 
+    def test_infer_root_cause_detects_large_model_overload_pattern(self):
+        run = DiagnosticRun(
+            model="qwen2.5-coder:14b",
+            workspace_root="/tmp/demo",
+            started_at="2026-04-24T00:56:23",
+            finished_at="2026-04-24T01:00:37",
+            short_timeout_s=20,
+            long_timeout_s=120,
+            results=[
+                DiagnosticCaseResult("direct_chat_minimal", "ok", 40675, "HTTP request completed"),
+                DiagnosticCaseResult("openai_minimal", "ok", 3781, "content='OK'"),
+                DiagnosticCaseResult(
+                    "openai_agent_quick_prompt",
+                    "timeout",
+                    20019,
+                    "APITimeoutError: Request timed out.",
+                ),
+                DiagnosticCaseResult(
+                    "agent_runtime_defaults_short",
+                    "timeout",
+                    20016,
+                    "APITimeoutError: Request timed out.",
+                ),
+                DiagnosticCaseResult(
+                    "agent_runtime_defaults_long",
+                    "ok",
+                    169205,
+                    "completed with 1 tool calls",
+                ),
+            ],
+        )
+
+        root_cause = infer_root_cause(run)
+
+        self.assertIn("qwen2.5-coder:14b", root_cause)
+        self.assertIn("实验模型", root_cause)
+        self.assertIn("默认本地模型", root_cause)
+
 
 if __name__ == "__main__":
     unittest.main()
