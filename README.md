@@ -17,6 +17,7 @@
 - 自带 `.vscode` 配置，可以在 VS Code 里一键启动 `jarvis`
 - REPL 现在有启动 banner、Git 状态头和动态提示符，更接近真正的 CLI 工具
 - 增加了 `edit_file` 工具和 `/patch` 命令，可以做局部编辑并直接预览改动
+- 增加了 `apply_patch` 工具，并且 patch 类修改现在支持更明确的 `y / p / n` 审批交互
 
 ## 前置条件
 
@@ -127,6 +128,7 @@ python agent.py
 | `read_file(path)` | 读取文本文件 |
 | `write_file(path, content)` | 整文件写入 |
 | `edit_file(path, old_text, new_text, replace_all=False)` | 精确替换文件中的一段文本 |
+| `apply_patch(path, edits)` | 一次应用多个精确文本替换 |
 | `list_files(path='.', glob='**/*', limit=200)` | 列出文件 / 目录 |
 | `grep_text(pattern, path='.', limit=50)` | 搜索文本 |
 | `run_command(cmd)` | 执行 shell 命令 |
@@ -141,6 +143,10 @@ python agent.py
   - agent 做了哪些动作
   - 每次动作具体改了哪些代码
 - 现在编辑工具在真正写入前也会先展示 `patch preview before apply`，你确认后才会落盘
+- 对 patch 类修改，现在会提示：
+  - `y`：应用 patch
+  - `p`：查看更完整的 patch
+  - `n`：取消
 
 常用方式：
 

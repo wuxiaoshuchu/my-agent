@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import tempfile
 import unittest
 import sys
@@ -14,10 +16,17 @@ class CapturingToolRuntime(ToolRuntime):
     def __init__(self, workspace_root, *, allow: bool = True):
         super().__init__(workspace_root, auto_approve=False, command_timeout=5)
         self.allow = allow
-        self.last_confirmation: tuple[str, str] | None = None
+        self.last_confirmation: tuple[str, str, str | None, str] | None = None
 
-    def _confirm(self, action: str, preview: str) -> bool:
-        self.last_confirmation = (action, preview)
+    def _confirm(
+        self,
+        action: str,
+        preview: str,
+        *,
+        full_preview: str | None = None,
+        accept_label: str = "继续",
+    ) -> bool:
+        self.last_confirmation = (action, preview, full_preview, accept_label)
         return self.allow
 
 
@@ -77,9 +86,11 @@ class ToolRuntimeTests(unittest.TestCase):
 
         self.assertIn("OK:", result)
         self.assertIsNotNone(runtime.last_confirmation)
-        _, preview = runtime.last_confirmation
+        _, preview, full_preview, accept_label = runtime.last_confirmation
         self.assertIn("[patch preview before apply]", preview)
         self.assertIn("+++ b/notes/demo.txt", preview)
+        self.assertIn("+++ b/notes/demo.txt", full_preview or "")
+        self.assertIn("应用这个 patch", accept_label)
 
     def test_edit_file_shows_patch_before_apply(self):
         self.runtime.write_file("src/app.py", "print('hello')\n")
@@ -88,10 +99,46 @@ class ToolRuntimeTests(unittest.TestCase):
 
         self.assertIn("OK: 已编辑", result)
         self.assertIsNotNone(runtime.last_confirmation)
-        _, preview = runtime.last_confirmation
+        _, preview, full_preview, _ = runtime.last_confirmation
         self.assertIn("[patch preview before apply]", preview)
         self.assertIn("-print('hello')", preview)
         self.assertIn("+print('patched')", preview)
+        self.assertIn("+print('patched')", full_preview or "")
+
+    def test_apply_patch_supports_multiple_hunks(self):
+        self.runtime.write_file("src/app.py", "alpha\nbeta\ngamma\n")
+        result = self.runtime.apply_patch(
+            "src/app.py",
+            [
+                {"old_text": "alpha", "new_text": "ALPHA"},
+                {"old_text": "gamma", "new_text": "GAMMA"},
+            ],
+        )
+        self.assertIn("OK: 已对 src/app.py 应用 2 个 patch hunk", result)
+        content = self.runtime.read_file("src/app.py")
+        self.assertIn("ALPHA", content)
+        self.assertIn("GAMMA", content)
+
+    def test_apply_patch_shows_patch_before_apply(self):
+        self.runtime.write_file("src/app.py", "alpha\nbeta\ngamma\n")
+        runtime = CapturingToolRuntime(self.workspace)
+        result = runtime.apply_patch(
+            "src/app.py",
+            [
+                {"old_text": "alpha", "new_text": "ALPHA"},
+                {"old_text": "gamma", "new_text": "GAMMA"},
+            ],
+        )
+
+        self.assertIn("OK: 已对 src/app.py 应用 2 个 patch hunk", result)
+        self.assertIsNotNone(runtime.last_confirmation)
+        action, preview, full_preview, accept_label = runtime.last_confirmation
+        self.assertEqual(action, "apply_patch")
+        self.assertIn("[patch preview before apply]", preview)
+        self.assertIn("-alpha", preview)
+        self.assertIn("+ALPHA", preview)
+        self.assertIn("+GAMMA", full_preview or "")
+        self.assertEqual(accept_label, "应用这个 patch")
 
 
 if __name__ == "__main__":

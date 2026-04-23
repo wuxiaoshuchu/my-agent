@@ -7,10 +7,12 @@
 ### 增加局部编辑工具和 patch 预览
 
 - 新增 `edit_file` 工具，支持按精确文本片段做局部编辑。
+- 新增 `apply_patch` 工具，支持一次应用多个精确文本替换。
 - `write_file` 和 `edit_file` 现在都会返回 `patch preview`，直接显示改了哪些行。
-- `write_file` 和 `edit_file` 现在在真正应用之前也会先展示 `patch preview before apply`。
+- `write_file`、`edit_file` 和 `apply_patch` 现在在真正应用之前也会先展示 `patch preview before apply`。
+- patch 类审批交互现在支持 `y / p / n`，可以更明确地接受、查看或取消 patch。
 - 新增 `/patch [path]` 命令，可以在 REPL 里直接看当前 patch。
-- 补充测试，覆盖局部编辑、patch 预览和 untracked 文件预览。
+- 补充测试，覆盖局部编辑、多 hunk patch、patch 预览和 untracked 文件预览。
 
 ### 为什么这样改
 
