@@ -7,7 +7,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent import AgentConfig, build_system_prompt, extract_fake_tool_calls
+from agent import (
+    ActivityEntry,
+    AgentConfig,
+    AgentSession,
+    build_system_prompt,
+    extract_fake_tool_calls,
+)
 from tools import ToolRuntime
 
 
@@ -47,6 +53,44 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
 
             self.assertIn("项目约定（来自 HARNESS.md）", prompt)
             self.assertIn("Always update CHANGELOG.md", prompt)
+
+    def test_summary_report_includes_recent_activity_and_commit_hint(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "tracked.txt").write_text("v1\n", encoding="utf-8")
+
+            import subprocess
+
+            subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.com"],
+                cwd=workspace,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test User"],
+                cwd=workspace,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(["git", "add", "tracked.txt"], cwd=workspace, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=workspace, check=True, capture_output=True)
+            (workspace / "tracked.txt").write_text("v2\n", encoding="utf-8")
+
+            session = object.__new__(AgentSession)
+            from agent import WorkspaceInspector
+
+            session.inspector = WorkspaceInspector(workspace)
+            session.activity_log = [
+                ActivityEntry(timestamp="10:00:00", kind="user", summary="please update tracked.txt")
+            ]
+
+            summary = AgentSession.summary_report(session, limit=5)
+
+            self.assertIn("本轮摘要", summary)
+            self.assertIn("please update tracked.txt", summary)
+            self.assertIn("建议 commit message", summary)
 
 
 if __name__ == "__main__":

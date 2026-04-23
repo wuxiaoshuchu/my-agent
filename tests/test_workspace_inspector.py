@@ -65,6 +65,16 @@ class WorkspaceInspectorTests(unittest.TestCase):
         self.assertIn("还没有被 Git 跟踪", report)
         self.assertIn("hello", report)
 
+    def test_suggest_commit_message_prefers_agent_workflow(self):
+        message = self.inspector.suggest_commit_message()
+        self.assertTrue(message.startswith("chore:") or message.startswith("feat:"))
+
+    def test_commit_all_creates_commit_and_cleans_worktree(self):
+        ok, output = self.inspector.commit_all("test: save progress")
+        self.assertTrue(ok)
+        self.assertIn("test: save progress", output)
+        self.assertTrue(self.inspector.is_clean())
+
 
 if __name__ == "__main__":
     unittest.main()

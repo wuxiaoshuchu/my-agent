@@ -112,6 +112,25 @@ class WorkspaceInspector:
         ok, output = self._run_git("rev-parse", "--is-inside-work-tree")
         return ok and output == "true"
 
+    def status_lines(self) -> list[str]:
+        ok, status = self._run_git("status", "--short")
+        if not ok or not status:
+            return []
+        return status.splitlines()
+
+    def is_clean(self) -> bool:
+        return len(self.status_lines()) == 0
+
+    def changed_paths(self) -> list[str]:
+        paths: list[str] = []
+        for line in self.status_lines():
+            body = line[3:].strip() if len(line) >= 4 else line.strip()
+            if " -> " in body:
+                body = body.split(" -> ", 1)[1]
+            if body:
+                paths.append(body)
+        return paths
+
     def branch_report(self) -> str:
         if not self.is_git_repo():
             return "当前工作区不是 Git 仓库。"
@@ -171,6 +190,37 @@ class WorkspaceInspector:
             if status_ok and short_status:
                 return f"(git diff --stat 没有输出)\n\n当前工作区变更：\n{short_status}"
         return diff or "没有可显示的 diff。"
+
+    def suggest_commit_message(self) -> str:
+        paths = self.changed_paths()
+        if not paths:
+            return "chore: update project"
+
+        if any(path.startswith(".vscode/") for path in paths):
+            return "chore: add vscode jarvis workflow"
+        if "agent.py" in paths and any(path.startswith("tests/") for path in paths):
+            return "feat: improve jarvis workflow"
+        if any(path in {"README.md", "CHANGELOG.md", "HARNESS.md"} for path in paths):
+            return "docs: update project guidance"
+        if len(paths) == 1:
+            stem = Path(paths[0]).stem.replace("_", " ")
+            return f"chore: update {stem}"
+        return "chore: update project"
+
+    def commit_all(self, message: str) -> tuple[bool, str]:
+        if not self.is_git_repo():
+            return False, "当前工作区不是 Git 仓库。"
+        if self.is_clean():
+            return False, "当前没有可提交的变更。"
+
+        ok, output = self._run_git("add", "-A")
+        if not ok:
+            return False, output
+
+        ok, output = self._run_git("commit", "-m", message)
+        if not ok:
+            return False, output
+        return True, output
 
 
 def default_api_key(base_url: str) -> str:
@@ -324,6 +374,72 @@ class AgentSession:
         if len(self.activity_log) > 200:
             self.activity_log = self.activity_log[-200:]
 
+    def _confirm(self, prompt: str) -> bool:
+        if self.runtime.auto_approve:
+            return True
+        if not sys.stdin.isatty():
+            return False
+        answer = input(f"{prompt} 输入 y 继续，其余任意键取消: ").strip().lower()
+        return answer in {"y", "yes"}
+
+    def summary_report(self, limit: int = 8) -> str:
+        lines = ["本轮摘要"]
+
+        entries = self.activity_log[-limit:]
+        if entries:
+            lines.append("")
+            lines.append("最近动作：")
+            lines.extend(
+                f"- {entry.timestamp} [{entry.kind}] {entry.summary}" for entry in entries
+            )
+
+        if self.inspector.is_git_repo():
+            lines.append("")
+            lines.append("Git 状态：")
+            lines.append(self.inspector.status_report())
+
+            diff_stat = self.inspector.diff_report(stat_only=True)
+            if diff_stat:
+                lines.append("")
+                lines.append("Diff 摘要：")
+                lines.append(diff_stat)
+
+            if not self.inspector.is_clean():
+                lines.append("")
+                lines.append(
+                    f"建议 commit message: {self.inspector.suggest_commit_message()}"
+                )
+        else:
+            lines.append("")
+            lines.append("当前工作区不是 Git 仓库。")
+
+        return "\n".join(lines)
+
+    def commit_current_changes(self, message: str | None = None) -> str:
+        if not self.inspector.is_git_repo():
+            return "当前工作区不是 Git 仓库。"
+        if self.inspector.is_clean():
+            return "当前没有可提交的变更。"
+
+        commit_message = message or self.inspector.suggest_commit_message()
+        preview = "\n".join(
+            [
+                "准备创建 commit：",
+                f"message: {commit_message}",
+                "",
+                "将提交这些变更：",
+                self.inspector.status_report(),
+            ]
+        )
+        print(preview)
+        if not self._confirm("确认创建这个 commit 吗？"):
+            return "已取消 commit。"
+
+        ok, output = self.inspector.commit_all(commit_message)
+        if ok:
+            self.log_activity("commit", commit_message)
+        return output
+
     def add_user_message(self, text: str) -> None:
         self.messages.append({"role": "user", "content": text})
         self.log_activity("user", text[:200])
@@ -445,6 +561,8 @@ class AgentSession:
                         "  /status 查看当前 Git 状态",
                         "  /branch 查看当前分支",
                         "  /diff [--stat|path] 查看改动",
+                        "  /summary [N] 查看本轮摘要",
+                        "  /commit [message] 提交当前变更",
                         "  /history [N] 查看最近会话动作",
                         "  /approve [on|off|status] 查看或切换审批模式",
                         "  /clear  清空当前会话历史",
@@ -481,6 +599,22 @@ class AgentSession:
                 else:
                     target = args[0]
             print(_truncate_cli_output(self.inspector.diff_report(target=target, stat_only=stat_only)))
+            return True
+
+        if command == "/summary":
+            limit = 8
+            if args:
+                try:
+                    limit = max(1, int(args[0]))
+                except ValueError:
+                    print("用法: /summary [N]")
+                    return True
+            print(_truncate_cli_output(self.summary_report(limit=limit)))
+            return True
+
+        if command == "/commit":
+            message = " ".join(args).strip() or None
+            print(_truncate_cli_output(self.commit_current_changes(message=message)))
             return True
 
         if command == "/history":
@@ -534,7 +668,7 @@ class AgentSession:
                     f"my-agent REPL",
                     f"model: {self.config.model}",
                     f"workspace: {self.config.workspace_root}",
-                    "输入 /help 查看命令，输入 /status 看仓库状态，输入 /quit 退出。",
+                    "输入 /help 查看命令，输入 /summary 看本轮摘要，输入 /quit 退出。",
                 ]
             )
         )

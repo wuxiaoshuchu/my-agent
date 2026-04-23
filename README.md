@@ -12,7 +12,9 @@
 - 写文件、执行命令前会先请求确认
 - 文件读写限制在工作区里，减少误操作
 - 增加了 `/status` `/branch` `/diff` `/history`，终于能看见自己做了什么
+- 增加了 `/summary` 和 `/commit`，可以回看本轮成果并直接提交
 - 仓库现在有 [HARNESS.md](HARNESS.md) 和 [CHANGELOG.md](CHANGELOG.md)，方便 agent 继承规则和回看成长史
+- 自带 `.vscode` 配置，可以在 VS Code 里一键启动 `jarvis`
 
 ## 前置条件
 
@@ -82,11 +84,26 @@ python agent.py
 /diff   查看当前 diff
 /diff --stat 查看 diff 摘要
 /diff path/to/file 查看单文件 diff
+/summary [N] 查看本轮摘要
+/commit [message] 提交当前变更
 /history [N] 查看最近会话动作
 /approve [on|off|status] 切换或查看审批模式
 /clear  清空会话历史
 /quit   退出
 ```
+
+## VS Code 里启动
+
+仓库已经带了：
+
+- [.vscode/launch.json](.vscode/launch.json)
+- [.vscode/tasks.json](.vscode/tasks.json)
+
+在 VS Code 里你可以直接：
+
+1. `Run and Debug` 里选择 `Jarvis REPL`
+2. 或者运行任务 `Jarvis: REPL`
+3. 首次没装依赖时，先运行任务 `Jarvis: Install`
 
 ## 当前工具
 

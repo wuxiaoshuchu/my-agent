@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Jarvis: Install",
+      "type": "shell",
+      "command": "./scripts/dev-install.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Jarvis: REPL",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/jarvis",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "isBackground": false
+    },
+    {
+      "label": "Jarvis: Tests",
+      "type": "shell",
+      "command": "python3 -m unittest discover -s tests",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

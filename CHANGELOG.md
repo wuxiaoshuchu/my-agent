@@ -4,6 +4,24 @@
 
 ## 2026-04-23
 
+### 增加提交与摘要命令，并补 IDE 启动配置
+
+- 新增 `/summary`，可以直接回看本轮动作、Git 状态和 diff 摘要。
+- 新增 `/commit [message]`，会先展示将提交的内容，再确认并创建 commit。
+- 给仓库补了 `.vscode/launch.json` 和 `.vscode/tasks.json`，方便在 VS Code 里一键启动 `jarvis`。
+- 补充了对应测试，覆盖项目规则注入、CLI 参数，以及 Git 摘要/提交能力。
+
+### 为什么这样改
+
+- 让 `jarvis` 更像一个真实长期使用的开发工具，而不是只能手动跑脚本。
+- 让每一轮修改都更容易被回看、总结和提交。
+- 让 IDE 里的启动体验更接近 `claude` 这类现成工具。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `jarvis --help`
+
 ### 把 my-agent 推进成可安装的 `jarvis` CLI
 
 - 把原本的最小脚本演进成了 session 驱动的本地编码 agent。

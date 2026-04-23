@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Jarvis REPL",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "${workspaceFolder}/.venv/bin/jarvis",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Jarvis REPL (Auto Approve)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "${workspaceFolder}/.venv/bin/jarvis --auto-approve",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
