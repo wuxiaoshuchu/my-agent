@@ -1,0 +1,42 @@
+[
+  {
+    "id": "runtime_defaults",
+    "description": "读取默认运行时配置并说出关键字段。",
+    "prompt": "读取 jarvis.config.json，告诉我默认 model、base_url 和 num_ctx。请尽量简短，并保留原值。",
+    "checks": [
+      "qwen2.5-coder:7b",
+      "http://localhost:11434/v1",
+      "16384"
+    ]
+  },
+  {
+    "id": "model_subcommands",
+    "description": "确认 /model 支持的子命令。",
+    "prompt": "在这个仓库里找到 `/model` 命令支持的子命令，并简短列出来。回答里请保留 `use`、`set`、`ctx` 这几个词。",
+    "checks": [
+      "use",
+      "set",
+      "ctx"
+    ]
+  },
+  {
+    "id": "p1_context_engine",
+    "description": "总结路线图里的 P1 重点。",
+    "prompt": "阅读 way-to-claw-code.md，总结 P1 context engine 最核心的三件事。回答里请保留 `compact`、`memory`、`/compact` 这些关键词。",
+    "checks": [
+      "compact",
+      "memory",
+      "/compact"
+    ]
+  },
+  {
+    "id": "p0_runtime_files",
+    "description": "识别 P0 运行时配置相关文件。",
+    "prompt": "告诉我这个仓库里和 P0 运行时模型配置最相关的 3 个关键文件名：默认配置文件、运行时模块、模型基线文档。请直接列文件名。",
+    "checks": [
+      "jarvis.config.json",
+      "runtime_config.py",
+      "model-baseline.md"
+    ]
+  }
+]

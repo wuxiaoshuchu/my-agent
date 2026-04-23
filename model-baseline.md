@@ -48,12 +48,52 @@
 - 长任务里是否容易跑偏
 - 发热和卡顿体感
 
+## Benchmark 脚手架
+
+仓库里现在已经有：
+
+- `benchmarks/agent_tasks.json`
+- `scripts/benchmark_agent.py`
+- `benchmark-results/`
+
+默认先 benchmark 只读任务，这样可以先比较模型在 repo 理解、工具调用和总结质量上的差异。
+
+## 首轮真实结果
+
+首轮真实结果已经保存到：
+
+- [benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.md)
+- [benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.json](/Users/wuxiaoshuchu/Desktop/my-agent/benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.json)
+
+运行命令：
+
+```bash
+python3 -u scripts/benchmark_agent.py \
+  --models qwen2.5-coder:7b \
+  --max-turns 3 \
+  --request-timeout 20
+```
+
+结果：
+
+- `pass_rate`: `0/4`
+- `average_duration_ms`: `20548`
+- 4 个任务都在首轮模型请求阶段触发 `APITimeoutError`
+- 在这个受控 benchmark 下，`qwen2.5-coder:7b` 还没进入工具调用阶段就超时了
+
+这说明当前瓶颈不只是“模型大小”，更可能是：
+
+- 当前 `Ollama` 运行时响应偏慢
+- 当前 `7b` 在这个 agent loop 和超时边界下不够稳
+- 下一步更值得优先做运行时诊断或直接拉 `14b / 16b` 做对比
+
 ## 常用命令
 
 ```bash
 jarvis
 jarvis --model qwen2.5-coder:14b
 jarvis --num-ctx 24576
+./.venv/bin/python scripts/benchmark_agent.py --models qwen2.5-coder:7b
 ```
 
 在 REPL 里：

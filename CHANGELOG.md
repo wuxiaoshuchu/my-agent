@@ -4,6 +4,28 @@
 
 ## 2026-04-23
 
+### 增加模型 benchmark 脚手架和首轮结果目录
+
+- 新增 [benchmark_harness.py](benchmark_harness.py)，把 benchmark 任务加载、结果评估、markdown 报告渲染和结果序列化抽成独立模块。
+- 新增 [benchmarks/agent_tasks.json](benchmarks/agent_tasks.json)，定义默认只读 benchmark 任务集。
+- 新增 [scripts/benchmark_agent.py](scripts/benchmark_agent.py)，可以直接对一个或多个模型跑真实 agent benchmark。
+- 新增首份真实结果 [benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.md](benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.md) 和对应 json。
+- 新增 [tests/test_benchmark_harness.py](tests/test_benchmark_harness.py)，覆盖 benchmark 结果评估和报告渲染。
+- 更新 [README.md](README.md) 和 [model-baseline.md](model-baseline.md)，把 benchmark 工作流真正写进仓库。
+
+### 为什么这样改
+
+- 这是 `P0` 和 `P4` 之间很值的一座桥：先让仓库具备“能跑 benchmark”的能力，再逐步积累真实数据。
+- 让后面比较 `7b / 14b / 16b` 时不再靠主观体感，而是有统一任务集和固定输出格式。
+- 让模型优化开始沉淀成结果文件，而不是每次重新聊一遍。
+- 让当前本机 `7b` 的真实基线被记录下来，而不是停留在“感觉有点慢”。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `python3 -u scripts/benchmark_agent.py --models qwen2.5-coder:7b --max-turns 3 --request-timeout 20`
+- `./.venv/bin/jarvis --help`
+
 ### 增加模型可观察性、默认模型配置和本机基线
 
 - 新增 [jarvis.config.json](jarvis.config.json)，把默认 `model / base_url / num_ctx` 真正写进仓库。

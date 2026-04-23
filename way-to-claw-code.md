@@ -78,6 +78,13 @@
 - 暂不建议作为主力本地模型：`qwen3-coder:30b`
   - 原因：你的机器是 `M1 + 16GB`，这类 `19GB` 级模型对日常本地使用太吃紧
 
+### 最近观察
+
+- `qwen2.5-coder:7b` 在首轮真实 benchmark 下表现为 `0/4`
+- benchmark 参数：`--max-turns 3 --request-timeout 20`
+- 4 个只读任务都在首轮模型请求阶段超时，还没进入工具调用
+- 这说明当前差距不只是 agent 架构，也包括本机运行时响应
+
 ### 完成标准
 
 - 至少 2 个候选模型可以稳定运行
@@ -224,8 +231,8 @@
 
 如果未来 agent 重新进入这个仓库，不知道先做什么，默认先做下面这 3 件事中的第 1 件：
 
-- [ ] 检查并修复本机 `ollama` 稳定性问题
-- [ ] 继续补 benchmark 数据，比较 `qwen2.5-coder:7b / 14b` 与 `deepseek-coder-v2:16b`
+- [ ] 检查并修复本机 `ollama` 稳定性 / 响应慢问题
+- [ ] 用 benchmark 脚手架继续补数据，比较 `qwen2.5-coder:7b / 14b` 与 `deepseek-coder-v2:16b`
 - [ ] 给 `jarvis` 增加最小 `compact` 机制设计草案
 
 ## 不要误判的事情

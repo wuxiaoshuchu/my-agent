@@ -16,6 +16,7 @@
 - 仓库现在有 [HARNESS.md](HARNESS.md) 和 [CHANGELOG.md](CHANGELOG.md)，方便 agent 继承规则和回看成长史
 - 仓库现在还有 [way-to-claw-code.md](way-to-claw-code.md)，用于记录长期路线图和后续待办
 - 仓库现在还有 [jarvis.config.json](jarvis.config.json) 和 [model-baseline.md](model-baseline.md)，用于固定默认模型和记录本机模型基线
+- 仓库现在还有 benchmark 任务集和结果目录，可以开始比较不同本地模型的实际表现
 - 自带 `.vscode` 配置，可以在 VS Code 里一键启动 `jarvis`
 - REPL 现在有启动 banner、Git 状态头和动态提示符，更接近真正的 CLI 工具
 - 增加了 `edit_file` 工具和 `/patch` 命令，可以做局部编辑并直接预览改动
@@ -279,3 +280,48 @@ jarvis \
 ```
 
 如果你想回看这台机器的模型建议和当前基线，直接看 [model-baseline.md](model-baseline.md)。
+
+## 模型 benchmark
+
+仓库现在自带：
+
+- [benchmarks/agent_tasks.json](benchmarks/agent_tasks.json)：默认 benchmark 任务集
+- [scripts/benchmark_agent.py](scripts/benchmark_agent.py)：运行 benchmark 的脚本
+- [benchmark-results/](benchmark-results/)：保存每次 benchmark 输出的 json / markdown
+
+跑一轮当前模型：
+
+```bash
+./.venv/bin/python scripts/benchmark_agent.py --models qwen2.5-coder:7b
+```
+
+如果你想比较多个模型：
+
+```bash
+./.venv/bin/python scripts/benchmark_agent.py \
+  --models qwen2.5-coder:7b qwen2.5-coder:14b deepseek-coder-v2:16b
+```
+
+如果你担心某个模型卡住，可以加：
+
+```bash
+./.venv/bin/python scripts/benchmark_agent.py \
+  --models qwen2.5-coder:7b \
+  --request-timeout 45
+```
+
+这个 benchmark 目前测的是“agent 在真实仓库里完成只读任务的表现”，会记录：
+
+- 每个任务总耗时
+- 通过 / 未通过
+- 用了多少次工具
+- 用了哪些工具
+- 最终回答文本
+
+所以它不是只测裸模型，而是测“当前 jarvis + 当前模型 + 当前任务集”的组合。
+
+脚本现在也会逐任务打印进度，方便看见它到底卡在哪一类任务上。
+
+当前首份真实结果已经在：
+
+- [benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.md)
