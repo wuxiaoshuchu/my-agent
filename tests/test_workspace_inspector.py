@@ -65,6 +65,12 @@ class WorkspaceInspectorTests(unittest.TestCase):
         self.assertIn("还没有被 Git 跟踪", report)
         self.assertIn("hello", report)
 
+    def test_patch_report_includes_untracked_preview(self):
+        report = self.inspector.patch_report()
+        self.assertIn("tracked.txt", report)
+        self.assertIn("notes.txt", report)
+        self.assertIn("hello", report)
+
     def test_suggest_commit_message_prefers_agent_workflow(self):
         message = self.inspector.suggest_commit_message()
         self.assertTrue(message.startswith("chore:") or message.startswith("feat:"))

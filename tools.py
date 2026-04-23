@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 import subprocess
 import sys
@@ -11,6 +12,8 @@ from pathlib import Path
 
 MAX_TOOL_OUTPUT_CHARS = 3000
 MAX_FILE_PREVIEW_CHARS = 12000
+MAX_PATCH_PREVIEW_CHARS = 4000
+MAX_CONFIRM_PREVIEW_CHARS = 2000
 DEFAULT_LIST_LIMIT = 200
 DEFAULT_GREP_LIMIT = 50
 MAX_TEXT_FILE_SIZE = 512 * 1024
@@ -41,6 +44,28 @@ def _read_text_file(path: Path, limit: int = MAX_FILE_PREVIEW_CHARS) -> str:
 
 def _relative_display(path: Path, workspace_root: Path) -> str:
     return str(path.relative_to(workspace_root))
+
+
+def _build_patch_preview(
+    old_text: str,
+    new_text: str,
+    rel_path: str,
+    *,
+    existed_before: bool,
+) -> str:
+    from_file = f"a/{rel_path}" if existed_before else "/dev/null"
+    to_file = f"b/{rel_path}"
+    diff = "".join(
+        difflib.unified_diff(
+            old_text.splitlines(keepends=True),
+            new_text.splitlines(keepends=True),
+            fromfile=from_file,
+            tofile=to_file,
+        )
+    )
+    if not diff:
+        return "(没有文本变化)"
+    return _truncate(diff, limit=MAX_PATCH_PREVIEW_CHARS)
 
 
 def _looks_dangerous_command(cmd: str) -> bool:
@@ -83,7 +108,7 @@ class ToolRuntime:
                 "type": "function",
                 "function": {
                     "name": "write_file",
-                    "description": "写入文本文件，覆盖已有内容。执行前通常会询问用户确认。",
+                    "description": "写入文本文件，覆盖已有内容。适合创建新文件或整文件重写。执行前通常会询问用户确认。",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -94,6 +119,32 @@ class ToolRuntime:
                             },
                         },
                         "required": ["path", "content"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "edit_file",
+                    "description": "按精确文本片段编辑文件。适合局部修改，不用整文件重写。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "文件路径"},
+                            "old_text": {
+                                "type": "string",
+                                "description": "要替换的原始文本片段，必须与文件内容完全匹配",
+                            },
+                            "new_text": {
+                                "type": "string",
+                                "description": "替换后的文本片段",
+                            },
+                            "replace_all": {
+                                "type": "boolean",
+                                "description": "是否替换全部匹配项，默认 false",
+                            },
+                        },
+                        "required": ["path", "old_text", "new_text"],
                     },
                 },
             },
@@ -172,7 +223,8 @@ class ToolRuntime:
         return "\n".join(
             [
                 "- read_file(path): 读取工作区内文本文件",
-                "- write_file(path, content): 写文件，执行前会请求确认",
+                "- write_file(path, content): 整文件写入，适合新建或重写文件",
+                "- edit_file(path, old_text, new_text, replace_all=False): 精确替换文件中的一段文本",
                 "- list_files(path='.', glob='**/*', limit=200): 列目录或文件",
                 "- grep_text(pattern, path='.', limit=50): 搜索文本",
                 "- run_command(cmd): 在工作区根目录执行 shell，执行前会请求确认",
@@ -202,7 +254,7 @@ class ToolRuntime:
             return False
 
         print(f"\n[permission] {action}")
-        print(_truncate(preview, limit=500))
+        print(_truncate(preview, limit=MAX_CONFIRM_PREVIEW_CHARS))
         answer = input("允许吗？输入 y 继续，其余任意键取消: ").strip().lower()
         return answer in {"y", "yes"}
 
@@ -229,14 +281,84 @@ class ToolRuntime:
         except Exception as exc:
             return f"ERROR: {exc}"
 
+        existed_before = file_path.exists()
+        old_text = ""
+        if existed_before and file_path.is_file():
+            try:
+                old_text = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                return f"ERROR: 目标文件不是 UTF-8 文本: {_relative_display(file_path, self.workspace_root)}"
+
         rel = _relative_display(file_path, self.workspace_root)
-        preview = f"写入文件: {rel}\n\n{content[:400]}"
+        patch = _build_patch_preview(
+            old_text,
+            content,
+            rel,
+            existed_before=existed_before,
+        )
+        preview = f"写入文件: {rel}\n\n[patch preview before apply]\n{patch}"
         if not self._confirm("write_file", preview):
             return f"DENIED: 用户拒绝写入 {rel}"
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
-        return f"OK: 写入 {len(content)} 字符到 {rel}"
+        return f"OK: 写入 {len(content)} 字符到 {rel}\n\n[patch preview]\n{patch}"
+
+    def edit_file(
+        self,
+        path: str,
+        old_text: str,
+        new_text: str,
+        replace_all: bool = False,
+    ) -> str:
+        try:
+            file_path = self._resolve_path(path)
+        except Exception as exc:
+            return f"ERROR: {exc}"
+
+        if file_path.is_dir():
+            return f"ERROR: 这是目录不是文件: {_relative_display(file_path, self.workspace_root)}"
+
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return f"ERROR: 目标文件不是 UTF-8 文本: {_relative_display(file_path, self.workspace_root)}"
+
+        occurrences = content.count(old_text)
+        if occurrences == 0:
+            return "ERROR: old_text 没有在目标文件中找到，无法精确编辑"
+        if occurrences > 1 and not replace_all:
+            return (
+                f"ERROR: old_text 出现了 {occurrences} 次。"
+                "请提供更精确的片段，或显式设置 replace_all=true"
+            )
+
+        if replace_all:
+            updated = content.replace(old_text, new_text)
+            replaced_count = occurrences
+        else:
+            updated = content.replace(old_text, new_text, 1)
+            replaced_count = 1
+
+        if updated == content:
+            return "ERROR: 编辑后内容没有变化"
+
+        rel = _relative_display(file_path, self.workspace_root)
+        patch = _build_patch_preview(
+            content,
+            updated,
+            rel,
+            existed_before=True,
+        )
+        preview = f"编辑文件: {rel}\n\n[patch preview before apply]\n{patch}"
+        if not self._confirm("edit_file", preview):
+            return f"DENIED: 用户拒绝编辑 {rel}"
+
+        file_path.write_text(updated, encoding="utf-8")
+        return (
+            f"OK: 已编辑 {rel}，替换 {replaced_count} 处匹配\n\n"
+            f"[patch preview]\n{patch}"
+        )
 
     def list_files(self, path: str = ".", glob: str = "**/*", limit: int = DEFAULT_LIST_LIMIT) -> str:
         try:
@@ -349,6 +471,8 @@ class ToolRuntime:
             return self.read_file(**args)
         if name == "write_file":
             return self.write_file(**args)
+        if name == "edit_file":
+            return self.edit_file(**args)
         if name == "list_files":
             return self.list_files(**args)
         if name == "grep_text":
