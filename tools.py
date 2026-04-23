@@ -138,6 +138,7 @@ def _count_patch_stats(diff: str) -> tuple[int, int, int]:
 
 def _render_panel(title: str, rows: list[str], *, width: int = PATCH_REVIEW_PANEL_WIDTH) -> str:
     content_width = max(20, width - 4)
+    use_color = _supports_color()
 
     def fit(line: str) -> str:
         if len(line) > content_width:
@@ -149,6 +150,17 @@ def _render_panel(title: str, rows: list[str], *, width: int = PATCH_REVIEW_PANE
     for row in rows:
         lines.append(f"| {fit(row).ljust(content_width)} |")
     lines.append(border)
+    if use_color:
+        lines[0] = _style_text(lines[0], color="dim", use_color=True)
+        lines[1] = _style_text(lines[1], color="cyan", use_color=True)
+        for index, row in enumerate(rows, start=2):
+            if row.startswith("keys:") or row.lstrip().startswith("["):
+                lines[index] = _style_text(lines[index], color="yellow", use_color=True)
+            elif row.startswith("input:"):
+                lines[index] = _style_text(lines[index], color="dim", use_color=True)
+            elif row.startswith("status:"):
+                lines[index] = _style_text(lines[index], color="bold", use_color=True)
+        lines[-1] = _style_text(lines[-1], color="dim", use_color=True)
     return "\n".join(lines)
 
 
@@ -169,6 +181,25 @@ def _render_patch_review_screen(
     panel = _render_panel(title, rows)
     body = _format_patch_diff(diff, use_color=_supports_color())
     return f"{panel}\n{preview_label}\n{body}"
+
+
+def _render_key_hints(actions: list[tuple[str, str]], *, width: int = PATCH_REVIEW_PANEL_WIDTH) -> list[str]:
+    content_width = max(20, width - 4)
+    prefix = "keys: "
+    continuation = " " * len(prefix)
+    rows: list[str] = []
+    current = prefix
+    for key, label in actions:
+        chunk = f"[{key}] {label}"
+        separator = " | " if current.strip() and current != prefix else ""
+        if len(current) + len(separator) + len(chunk) > content_width:
+            rows.append(current)
+            current = continuation + chunk
+            continue
+        current += separator + chunk
+    if current.strip():
+        rows.append(current)
+    return rows
 
 
 @dataclass
@@ -390,13 +421,13 @@ class ToolRuntime:
         print(f"\n[permission] {action}")
         print(_truncate(preview, limit=MAX_CONFIRM_PREVIEW_CHARS))
         if full_preview is None:
-            answer = input("允许吗？输入 y 继续，其余任意键取消: ").strip().lower()
+            answer = self._read_choice("[y] 继续  [n] 取消 > ")
             return answer in {"y", "yes"}
 
         while True:
-            answer = input(
-                f"输入 y {accept_label}，p 查看完整 patch，n 取消: "
-            ).strip().lower()
+            answer = self._read_choice(
+                f"[y] {accept_label}  [p] 查看完整 patch  [n] 取消 > "
+            )
             if answer in {"y", "yes"}:
                 return True
             if answer in {"", "n", "no"}:
@@ -406,6 +437,53 @@ class ToolRuntime:
                 print(_truncate(full_preview, limit=MAX_FULL_PATCH_DISPLAY_CHARS))
                 continue
             print("请输入 y / p / n")
+
+    def _read_single_key(self, prompt: str) -> str | None:
+        if not sys.stdin.isatty():
+            return None
+
+        try:
+            import termios
+            import tty
+        except ImportError:
+            return None
+
+        try:
+            fd = sys.stdin.fileno()
+        except (AttributeError, OSError):
+            return None
+
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+
+        previous_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            char = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, previous_settings)
+
+        if char == "\x03":
+            raise KeyboardInterrupt
+        if char in {"\r", "\n"}:
+            shown = "ENTER"
+            normalized = ""
+        else:
+            shown = char
+            normalized = char.lower()
+
+        sys.stdout.write(f"{shown}\n")
+        sys.stdout.flush()
+        return normalized
+
+    def _read_choice(self, prompt: str) -> str:
+        choice = self._read_single_key(prompt)
+        if choice is not None:
+            return choice
+        answer = input(prompt).strip().lower()
+        if not answer:
+            return ""
+        return answer[0]
 
     def _choose_patch_apply_mode(
         self,
@@ -426,9 +504,7 @@ class ToolRuntime:
 
         if not allow_hunk_review:
             while True:
-                answer = input(
-                    "输入 y 应用这个 patch，p 查看完整 patch，n 取消: "
-                ).strip().lower()
+                answer = self._read_choice("[y] 应用这个 patch  [p] 查看完整 patch  [n] 取消 > ")
                 if answer in {"y", "yes"}:
                     return "apply_all"
                 if answer in {"", "n", "no"}:
@@ -440,9 +516,9 @@ class ToolRuntime:
                 print("请输入 y / p / n")
 
         while True:
-            answer = input(
-                "输入 y 全部应用，h 逐段选择，p 查看完整 patch，n 取消: "
-            ).strip().lower()
+            answer = self._read_choice(
+                "[y] 全部应用  [h] 逐段选择  [p] 查看完整 patch  [n] 取消 > "
+            )
             if answer in {"y", "yes"}:
                 return "apply_all"
             if answer in {"h", "review"}:
@@ -474,9 +550,9 @@ class ToolRuntime:
         print(_truncate(preview, limit=MAX_CONFIRM_PREVIEW_CHARS))
 
         while True:
-            answer = input(
-                "输入 y 应用这段，s 跳过，a 应用这段和剩余，p 查看完整 hunk，q 结束并保留已接受内容: "
-            ).strip().lower()
+            answer = self._read_choice(
+                "[y] 应用这段  [s] 跳过  [a] 应用剩余  [p] 完整 hunk  [q] 停止并保留已接受内容 > "
+            )
             if answer in {"y", "yes"}:
                 return "apply"
             if answer in {"", "s", "skip"}:
@@ -611,8 +687,12 @@ class ToolRuntime:
             patch,
             preview_label="[patch preview before apply]",
             meta_lines=[
+                "status: ready to write",
                 f"mode: {'create' if not existed_before else 'overwrite'}",
-                "actions: y apply | p full patch | n cancel",
+                "input: single-key mode; no Enter needed",
+                *_render_key_hints(
+                    [("y", "apply"), ("p", "full patch"), ("n", "cancel")]
+                ),
             ],
         )
         full_preview_screen = _render_patch_review_screen(
@@ -621,8 +701,12 @@ class ToolRuntime:
             full_patch,
             preview_label="[patch preview before apply]",
             meta_lines=[
+                "status: ready to write",
                 f"mode: {'create' if not existed_before else 'overwrite'}",
-                "actions: y apply | p full patch | n cancel",
+                "input: single-key mode; no Enter needed",
+                *_render_key_hints(
+                    [("y", "apply"), ("p", "full patch"), ("n", "cancel")]
+                ),
             ],
         )
         if not self._confirm(
@@ -688,8 +772,12 @@ class ToolRuntime:
             patch,
             preview_label="[patch preview before apply]",
             meta_lines=[
+                "status: ready to edit",
                 f"mode: {mode_text}",
-                "actions: y apply | p full patch | n cancel",
+                "input: single-key mode; no Enter needed",
+                *_render_key_hints(
+                    [("y", "apply"), ("p", "full patch"), ("n", "cancel")]
+                ),
             ],
         )
         full_preview_screen = _render_patch_review_screen(
@@ -698,8 +786,12 @@ class ToolRuntime:
             full_patch,
             preview_label="[patch preview before apply]",
             meta_lines=[
+                "status: ready to edit",
                 f"mode: {mode_text}",
-                "actions: y apply | p full patch | n cancel",
+                "input: single-key mode; no Enter needed",
+                *_render_key_hints(
+                    [("y", "apply"), ("p", "full patch"), ("n", "cancel")]
+                ),
             ],
         )
         if not self._confirm(
@@ -760,11 +852,22 @@ class ToolRuntime:
             patch,
             preview_label="[patch preview before apply]",
             meta_lines=[
+                "status: waiting for approval",
                 f"planned edits: {len(normalized_edits)}",
-                (
-                    "actions: y apply all | h review hunks | p full patch | n cancel"
+                "input: single-key mode; no Enter needed",
+                *(
+                    _render_key_hints(
+                        [
+                            ("y", "apply all"),
+                            ("h", "review hunks"),
+                            ("p", "full patch"),
+                            ("n", "cancel"),
+                        ]
+                    )
                     if allow_hunk_review
-                    else "actions: y apply | p full patch | n cancel"
+                    else _render_key_hints(
+                        [("y", "apply"), ("p", "full patch"), ("n", "cancel")]
+                    )
                 ),
             ],
         )
@@ -774,11 +877,22 @@ class ToolRuntime:
             full_patch,
             preview_label="[patch preview before apply]",
             meta_lines=[
+                "status: waiting for approval",
                 f"planned edits: {len(normalized_edits)}",
-                (
-                    "actions: y apply all | h review hunks | p full patch | n cancel"
+                "input: single-key mode; no Enter needed",
+                *(
+                    _render_key_hints(
+                        [
+                            ("y", "apply all"),
+                            ("h", "review hunks"),
+                            ("p", "full patch"),
+                            ("n", "cancel"),
+                        ]
+                    )
                     if allow_hunk_review
-                    else "actions: y apply | p full patch | n cancel"
+                    else _render_key_hints(
+                        [("y", "apply"), ("p", "full patch"), ("n", "cancel")]
+                    )
                 ),
             ],
         )
@@ -838,8 +952,18 @@ class ToolRuntime:
                 hunk_patch,
                 preview_label="[patch hunk preview]",
                 meta_lines=[
+                    f"status: reviewing hunk {index}/{len(normalized_edits)}",
                     f"progress: accepted {accepted_hunks} | skipped {skipped_hunks} | remaining {len(normalized_edits) - index + 1}",
-                    "actions: y apply | s skip | a apply rest | p full hunk | q stop",
+                    "input: single-key mode; no Enter needed",
+                    *_render_key_hints(
+                        [
+                            ("y", "apply"),
+                            ("s", "skip"),
+                            ("a", "apply rest"),
+                            ("p", "full hunk"),
+                            ("q", "stop"),
+                        ]
+                    ),
                 ],
             )
             hunk_full_preview = _render_patch_review_screen(
@@ -848,8 +972,18 @@ class ToolRuntime:
                 hunk_full_patch,
                 preview_label="[patch hunk preview]",
                 meta_lines=[
+                    f"status: reviewing hunk {index}/{len(normalized_edits)}",
                     f"progress: accepted {accepted_hunks} | skipped {skipped_hunks} | remaining {len(normalized_edits) - index + 1}",
-                    "actions: y apply | s skip | a apply rest | p full hunk | q stop",
+                    "input: single-key mode; no Enter needed",
+                    *_render_key_hints(
+                        [
+                            ("y", "apply"),
+                            ("s", "skip"),
+                            ("a", "apply rest"),
+                            ("p", "full hunk"),
+                            ("q", "stop"),
+                        ]
+                    ),
                 ],
             )
             if apply_remaining:

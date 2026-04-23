@@ -120,7 +120,9 @@ class ToolRuntimeTests(unittest.TestCase):
         _, preview, full_preview, accept_label = runtime.last_confirmation
         self.assertIn("[ Write File Review ]", preview)
         self.assertIn("[patch preview before apply]", preview)
-        self.assertIn("actions: y apply | p full patch | n cancel", preview)
+        self.assertIn("status: ready to write", preview)
+        self.assertIn("input: single-key mode; no Enter needed", preview)
+        self.assertIn("keys: [y] apply | [p] full patch | [n] cancel", preview)
         self.assertIn("+++ b/notes/demo.txt", preview)
         self.assertIn("+++ b/notes/demo.txt", full_preview or "")
         self.assertIn("应用这个 patch", accept_label)
@@ -135,7 +137,10 @@ class ToolRuntimeTests(unittest.TestCase):
         _, preview, full_preview, _ = runtime.last_confirmation
         self.assertIn("[ Edit File Review ]", preview)
         self.assertIn("[patch preview before apply]", preview)
+        self.assertIn("status: ready to edit", preview)
         self.assertIn("mode: single replace", preview)
+        self.assertIn("input: single-key mode; no Enter needed", preview)
+        self.assertIn("keys: [y] apply | [p] full patch | [n] cancel", preview)
         self.assertIn("-print('hello')", preview)
         self.assertIn("+print('patched')", preview)
         self.assertIn("+print('patched')", full_preview or "")
@@ -171,8 +176,11 @@ class ToolRuntimeTests(unittest.TestCase):
         self.assertEqual(action, "apply_patch")
         self.assertIn("[ Patch Review ]", preview)
         self.assertIn("[patch preview before apply]", preview)
+        self.assertIn("status: waiting for approval", preview)
         self.assertIn("planned edits: 2", preview)
-        self.assertIn("actions: y apply all | h review hunks | p full patch | n cancel", preview)
+        self.assertIn("input: single-key mode; no Enter needed", preview)
+        self.assertIn("keys: [y] apply all | [h] review hunks | [p] full patch", preview)
+        self.assertIn("[n] cancel", preview)
         self.assertIn("-alpha", preview)
         self.assertIn("+ALPHA", preview)
         self.assertIn("+GAMMA", full_preview or "")
@@ -200,6 +208,9 @@ class ToolRuntimeTests(unittest.TestCase):
         self.assertEqual(len(runtime.hunk_reviews), 2)
         self.assertIn("[ Patch Hunk 1/2 ]", runtime.hunk_reviews[0][2])
         self.assertIn("[patch hunk preview]", runtime.hunk_reviews[0][2])
+        self.assertIn("status: reviewing hunk 1/2", runtime.hunk_reviews[0][2])
+        self.assertIn("input: single-key mode; no Enter needed", runtime.hunk_reviews[0][2])
+        self.assertIn("keys: [y] apply | [s] skip | [a] apply rest", runtime.hunk_reviews[0][2])
         self.assertIn("progress: accepted 0 | skipped 0 | remaining 2", runtime.hunk_reviews[0][2])
 
     def test_apply_patch_can_skip_every_hunk(self):
@@ -236,6 +247,7 @@ class ToolRuntimeTests(unittest.TestCase):
         )
 
         self.assertEqual(len(runtime.hunk_reviews), 2)
+        self.assertIn("status: reviewing hunk 2/2", runtime.hunk_reviews[1][2])
         self.assertIn("progress: accepted 1 | skipped 0 | remaining 1", runtime.hunk_reviews[1][2])
 
 
