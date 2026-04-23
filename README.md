@@ -15,6 +15,7 @@
 - 增加了 `/summary` 和 `/commit`，可以回看本轮成果并直接提交
 - 仓库现在有 [HARNESS.md](HARNESS.md) 和 [CHANGELOG.md](CHANGELOG.md)，方便 agent 继承规则和回看成长史
 - 自带 `.vscode` 配置，可以在 VS Code 里一键启动 `jarvis`
+- REPL 现在有启动 banner、Git 状态头和动态提示符，更接近真正的 CLI 工具
 
 ## 前置条件
 
@@ -45,6 +46,18 @@ pip install -e .
 
 ```bash
 jarvis
+```
+
+启动后你会直接看到：
+
+- `jarvis` banner
+- 当前 `workspace`
+- 当前 `model`
+- 当前 Git 分支 / ahead / dirty 状态
+- 输入提示符里的仓库状态，例如：
+
+```text
+jarvis [main +2 m3 ask]>
 ```
 
 或指定工作区：

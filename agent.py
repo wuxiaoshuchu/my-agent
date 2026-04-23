@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -84,6 +85,26 @@ class ActivityEntry:
     summary: str
 
 
+@dataclass
+class RepoStatusSnapshot:
+    in_repo: bool
+    branch: str = "-"
+    tracking: str | None = None
+    ahead: int = 0
+    behind: int = 0
+    staged: int = 0
+    modified: int = 0
+    untracked: int = 0
+
+    @property
+    def clean(self) -> bool:
+        return self.in_repo and self.staged == 0 and self.modified == 0 and self.untracked == 0
+
+    @property
+    def total_changes(self) -> int:
+        return self.staged + self.modified + self.untracked
+
+
 class WorkspaceInspector:
     def __init__(self, workspace_root: Path):
         self.workspace_root = workspace_root
@@ -102,7 +123,7 @@ class WorkspaceInspector:
         except subprocess.TimeoutExpired:
             return False, "git 命令超时"
 
-        output = (result.stdout or "").strip()
+        output = (result.stdout or "").rstrip("\n")
         error = (result.stderr or "").strip()
         if result.returncode != 0:
             return False, error or output or f"git 命令失败: {' '.join(args)}"
@@ -130,6 +151,69 @@ class WorkspaceInspector:
             if body:
                 paths.append(body)
         return paths
+
+    def status_snapshot(self) -> RepoStatusSnapshot:
+        if not self.is_git_repo():
+            return RepoStatusSnapshot(in_repo=False)
+
+        ok, branch_output = self._run_git("status", "--short", "--branch")
+        branch_line = branch_output.splitlines()[0] if ok and branch_output else "## unknown"
+        branch, tracking, ahead, behind = self._parse_branch_line(branch_line)
+
+        staged = 0
+        modified = 0
+        untracked = 0
+        for line in self.status_lines():
+            code = line[:2]
+            if code == "??":
+                untracked += 1
+                continue
+            if code and code[0] != " ":
+                staged += 1
+            if len(code) > 1 and code[1] != " ":
+                modified += 1
+
+        return RepoStatusSnapshot(
+            in_repo=True,
+            branch=branch,
+            tracking=tracking,
+            ahead=ahead,
+            behind=behind,
+            staged=staged,
+            modified=modified,
+            untracked=untracked,
+        )
+
+    def _parse_branch_line(self, branch_line: str) -> tuple[str, str | None, int, int]:
+        text = branch_line.removeprefix("## ").strip()
+        ahead = 0
+        behind = 0
+
+        bracket = ""
+        if " [" in text and text.endswith("]"):
+            text, bracket = text.rsplit(" [", 1)
+            bracket = bracket[:-1]
+
+        tracking = None
+        branch = text
+        if "..." in text:
+            branch, tracking = text.split("...", 1)
+
+        if bracket:
+            for chunk in bracket.split(","):
+                chunk = chunk.strip()
+                if chunk.startswith("ahead "):
+                    try:
+                        ahead = int(chunk.split()[1])
+                    except (IndexError, ValueError):
+                        ahead = 0
+                if chunk.startswith("behind "):
+                    try:
+                        behind = int(chunk.split()[1])
+                    except (IndexError, ValueError):
+                        behind = 0
+
+        return branch or "unknown", tracking, ahead, behind
 
     def branch_report(self) -> str:
         if not self.is_git_repo():
@@ -221,6 +305,87 @@ class WorkspaceInspector:
         if not ok:
             return False, output
         return True, output
+
+
+ASCII_BANNER = r"""
+     _                  _
+    | | __ _ _ ____   _(_)___
+ _  | |/ _` | '__\ \ / / / __|
+| |_| | (_| | |   \ V /| \__ \
+ \___/ \__,_|_|    \_/ |_|___/
+""".strip("\n")
+
+
+def supports_color(stream=None) -> bool:
+    stream = stream or sys.stdout
+    is_tty = bool(getattr(stream, "isatty", lambda: False)())
+    return is_tty and os.environ.get("TERM", "") not in {"", "dumb"}
+
+
+def style_text(text: str, *, color: str, use_color: bool) -> str:
+    if not use_color:
+        return text
+    codes = {
+        "cyan": "36",
+        "green": "32",
+        "yellow": "33",
+        "red": "31",
+        "dim": "2",
+        "bold": "1",
+    }
+    code = codes[color]
+    return f"\033[{code}m{text}\033[0m"
+
+
+def render_banner(*, use_color: bool) -> str:
+    banner = style_text(ASCII_BANNER, color="cyan", use_color=use_color)
+    subtitle = style_text("local coding agent", color="dim", use_color=use_color)
+    return f"{banner}\n{subtitle}"
+
+
+def format_git_summary(snapshot: RepoStatusSnapshot) -> str:
+    if not snapshot.in_repo:
+        return "git: not-a-repo"
+
+    parts = [f"git: branch={snapshot.branch}"]
+    if snapshot.ahead:
+        parts.append(f"ahead={snapshot.ahead}")
+    if snapshot.behind:
+        parts.append(f"behind={snapshot.behind}")
+    if snapshot.clean:
+        parts.append("clean")
+    else:
+        if snapshot.staged:
+            parts.append(f"staged={snapshot.staged}")
+        if snapshot.modified:
+            parts.append(f"modified={snapshot.modified}")
+        if snapshot.untracked:
+            parts.append(f"untracked={snapshot.untracked}")
+    return " | ".join(parts)
+
+
+def build_prompt_label(snapshot: RepoStatusSnapshot, *, auto_approve: bool) -> str:
+    parts: list[str] = []
+    if snapshot.in_repo:
+        parts.append(snapshot.branch)
+        if snapshot.ahead:
+            parts.append(f"+{snapshot.ahead}")
+        if snapshot.behind:
+            parts.append(f"-{snapshot.behind}")
+        if snapshot.clean:
+            parts.append("clean")
+        else:
+            if snapshot.staged:
+                parts.append(f"s{snapshot.staged}")
+            if snapshot.modified:
+                parts.append(f"m{snapshot.modified}")
+            if snapshot.untracked:
+                parts.append(f"u{snapshot.untracked}")
+    else:
+        parts.append("no-git")
+
+    parts.append("auto" if auto_approve else "ask")
+    return f"jarvis [{' '.join(parts)}]> "
 
 
 def default_api_key(base_url: str) -> str:
@@ -414,6 +579,24 @@ class AgentSession:
             lines.append("当前工作区不是 Git 仓库。")
 
         return "\n".join(lines)
+
+    def render_repl_header(self) -> str:
+        use_color = supports_color()
+        snapshot = self.inspector.status_snapshot()
+        lines = [
+            render_banner(use_color=use_color),
+            "",
+            style_text(f"workspace: {self.config.workspace_root}", color="bold", use_color=use_color),
+            f"model: {self.config.model} | approval: {'auto' if self.runtime.auto_approve else 'ask'}",
+            format_git_summary(snapshot),
+            "commands: /help /summary /status /diff /commit /quit",
+        ]
+        return "\n".join(lines)
+
+    def prompt_label(self) -> str:
+        return build_prompt_label(
+            self.inspector.status_snapshot(), auto_approve=self.runtime.auto_approve
+        )
 
     def commit_current_changes(self, message: str | None = None) -> str:
         if not self.inspector.is_git_repo():
@@ -662,20 +845,11 @@ class AgentSession:
         return True
 
     def repl(self) -> None:
-        print(
-            "\n".join(
-                [
-                    f"my-agent REPL",
-                    f"model: {self.config.model}",
-                    f"workspace: {self.config.workspace_root}",
-                    "输入 /help 查看命令，输入 /summary 看本轮摘要，输入 /quit 退出。",
-                ]
-            )
-        )
+        print(self.render_repl_header())
 
         while True:
             try:
-                user_input = input("\nuser> ").strip()
+                user_input = input(f"\n{self.prompt_label()}").strip()
             except (EOFError, KeyboardInterrupt):
                 print("\nbye")
                 return

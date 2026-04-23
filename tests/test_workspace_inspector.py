@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent import WorkspaceInspector
+from agent import WorkspaceInspector, build_prompt_label
 
 
 class WorkspaceInspectorTests(unittest.TestCase):
@@ -74,6 +74,30 @@ class WorkspaceInspectorTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("test: save progress", output)
         self.assertTrue(self.inspector.is_clean())
+
+    def test_status_snapshot_tracks_branch_and_dirty_counts(self):
+        snapshot = self.inspector.status_snapshot()
+        actual_branch = (
+            subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=self.repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            .stdout.strip()
+        )
+        self.assertEqual(snapshot.branch, actual_branch)
+        self.assertEqual(snapshot.modified, 1)
+        self.assertEqual(snapshot.untracked, 1)
+        self.assertFalse(snapshot.clean)
+
+    def test_build_prompt_label_reflects_repo_status(self):
+        snapshot = self.inspector.status_snapshot()
+        prompt = build_prompt_label(snapshot, auto_approve=False)
+        self.assertIn("ask", prompt)
+        self.assertIn(snapshot.branch, prompt)
+        self.assertTrue(prompt.startswith("jarvis ["))
 
 
 if __name__ == "__main__":

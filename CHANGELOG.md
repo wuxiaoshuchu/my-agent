@@ -4,6 +4,24 @@
 
 ## 2026-04-23
 
+### 增加启动 banner、状态头和动态提示符
+
+- 给 `jarvis` 的 REPL 增加了 ASCII banner。
+- 启动时会展示 workspace、model、审批模式和当前 Git 状态头。
+- 输入提示符现在会动态显示分支、ahead/behind、dirty 状态和审批模式。
+- 继续补充测试，覆盖 Git 状态快照和动态提示符格式。
+
+### 为什么这样改
+
+- 让工具一启动就更像成熟 CLI，而不是普通脚本。
+- 把“当前在哪个分支、仓库脏不脏、现在是 ask 还是 auto”这些关键上下文放到眼前。
+- 让你在 IDE 和终端里都更容易感受到它是一个真正的工具。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `jarvis --help`
+
 ### 增加提交与摘要命令，并补 IDE 启动配置
 
 - 新增 `/summary`，可以直接回看本轮动作、Git 状态和 diff 摘要。
