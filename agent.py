@@ -1,111 +1,235 @@
-"""最小 agent loop。
+"""本地编码 agent。
 
-架构：
-    user task
-      → 主循环 while True
-         → 调模型（本地 Ollama，OpenAI 兼容 API）
-         → 如果返回 tool_calls：执行工具 → 把结果塞回 messages → 继续循环
-         → 如果只有文本：打印 → 结束
-
-对照 claw-code/query.ts:241 的 queryLoop，只是去掉了：
-  - 流式输出（为了代码简短）
-  - 消息压缩（7B 模型上下文 32k 应付小任务够用）
-  - 权限系统（本地工具全开）
-  - skill / memory 注入（后续加）
+这一版在最小 loop 之上补了几件更像“产品”的能力：
+1. REPL 模式：支持多轮对话，不必每次重新启动进程
+2. Session 类：把消息历史、模型调用、工具执行收口起来
+3. 更合适的探索工具：list_files / grep_text，减少模型滥用 shell
+4. 基础确认机制：写文件、执行命令前先征求用户同意
 """
 
+from __future__ import annotations
+
+import argparse
 import json
-import os
 import re
+import shlex
 import subprocess
 import sys
 import uuid
-from openai import OpenAI
-from tools import TOOL_SCHEMAS, EXECUTORS, execute_tool
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
+from tools import ToolRuntime
 
 
-# ===== 配置 =====
-MODEL = "qwen2.5-coder:7b"
-BASE_URL = "http://localhost:11434/v1"
-API_KEY = "ollama"  # Ollama 不校验，随便填
+DEFAULT_MODEL = "qwen2.5-coder:7b"
+DEFAULT_BASE_URL = "http://localhost:11434/v1"
+DEFAULT_NUM_CTX = 16384
+DEFAULT_MAX_TURNS = 20
+DEFAULT_COMMAND_TIMEOUT = 30
+PROJECT_GUIDE_FILES = ("HARNESS.md", "CLAUDE.md")
+MAX_PROJECT_GUIDE_CHARS = 4000
 
-# Ollama 默认 num_ctx=4096，一次 ls /tmp 就能撑爆。
-# Qwen2.5 支持 32k，但 KV cache 线性增长。16k 在 M1 16GB 上是甜点。
-NUM_CTX = 16384
 
-MAX_TURNS = 20  # 防死循环
 SYSTEM_PROMPT_TEMPLATE = """你是一个本地编码助手，用户在 Mac 终端里和你对话。
 
-## 当前工作环境
-- 当前目录（cwd）：{cwd}
-- 当前目录内容：
-{ls_output}
+## 当前工作区
+- 工作区根目录：{workspace_root}
+- 根目录预览：
+{workspace_snapshot}
 
 ## 可用工具
-- read_file(path)              读文件
-- write_file(path, content)    写文件。会自动创建父目录。
-- run_command(cmd)             执行 shell 命令
+{tool_summary}
 
-## 工具选择铁律
-- 创建/修改文件 → **必须**用 write_file。不要用 `echo > file`、`cat << EOF`、`touch` 等 shell 骗招。
-- 运行程序、列目录、查找文件 → 用 run_command
-- 写完一个文件后运行它 → 分成两步：第 1 步 write_file，第 2 步 run_command。不要试图在一行 shell 里搞定。
+{project_guide}
 
-## 路径规则
-- cwd 是上面列出的那个。用户说"当前目录"就是它
-- 用相对路径或基于 cwd 的绝对路径。严禁 /Users/yourusername/...、/path/to/... 这种占位符
-- 文件不存在不要直接放弃，先用 run_command("ls") 确认实际路径
+## 行为规则
+- 优先使用专用工具而不是 shell：
+  - 读文件用 read_file
+  - 搜索文件用 list_files
+  - 搜索文本用 grep_text
+  - 修改文件用 write_file
+- 只有在专用工具做不到时，再使用 run_command
+- 你可以连续调用多个工具，但任务完成后必须输出纯文字总结
+- 不要伪造“我已经改好了”之类的描述；修改必须真的通过工具完成
 
-## 避免噪音命令（非常重要）
-工具输出会进入下一轮对话的上下文，输出太多会挤爆上下文窗口导致任务失败。
-- ❌ 不要：`ls /tmp`、`ls /`、`ls ~/Downloads`——这些目录有成千上万个文件
-- ❌ 不要：`find /` 这种全盘扫描
-- ❌ 不要：`cat` 超过几百行的文件
-- ✅ 应该：精确操作。要创建 /tmp/test/hello.py 直接 `mkdir -p /tmp/test` 即可，不需要先 ls
-- ✅ 应该：读大文件时用 `head -50 file` 或 `grep 'pattern' file`
-
-## 写测试代码时
-- 如果定义了函数（`def foo():`），记得在文件末尾实际调用它（`foo()`），否则 `python file.py` 什么都不会打印
-- 或者用 `if __name__ == "__main__":` 块
+## 路径与命令
+- 所有相对路径都以工作区根目录为基准
+- 文件读写受工作区限制，不要尝试访问工作区外的路径
+- shell 命令会在工作区根目录启动，并且执行前可能需要用户确认
+- 如果需要大范围搜索，先缩小目录，再 grep，避免制造超长输出
 
 ## 结束条件
-- 任务做完后，用**纯文字**总结你做了什么（不要再输出 JSON 格式的 tool call）
-- 只有在不需要任何工具时才输出纯文字"""
+- 当你不再需要工具时，直接用自然语言给出结果
+- 不要在最终答案里再输出 JSON 或伪造 tool call"""
 
 
-def build_system_prompt() -> str:
-    cwd = os.getcwd()
+@dataclass
+class AgentConfig:
+    model: str
+    base_url: str
+    api_key: str
+    num_ctx: int
+    max_turns: int
+    workspace_root: Path
+    auto_approve: bool
+    command_timeout: int
+
+
+@dataclass
+class ActivityEntry:
+    timestamp: str
+    kind: str
+    summary: str
+
+
+class WorkspaceInspector:
+    def __init__(self, workspace_root: Path):
+        self.workspace_root = workspace_root
+
+    def _run_git(self, *args: str) -> tuple[bool, str]:
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                cwd=self.workspace_root,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except FileNotFoundError:
+            return False, "git 不可用"
+        except subprocess.TimeoutExpired:
+            return False, "git 命令超时"
+
+        output = (result.stdout or "").strip()
+        error = (result.stderr or "").strip()
+        if result.returncode != 0:
+            return False, error or output or f"git 命令失败: {' '.join(args)}"
+        return True, output
+
+    def is_git_repo(self) -> bool:
+        ok, output = self._run_git("rev-parse", "--is-inside-work-tree")
+        return ok and output == "true"
+
+    def branch_report(self) -> str:
+        if not self.is_git_repo():
+            return "当前工作区不是 Git 仓库。"
+
+        ok, status = self._run_git("status", "--short", "--branch")
+        if not ok:
+            return status
+
+        lines = status.splitlines()
+        first_line = lines[0] if lines else "(无法读取分支信息)"
+        ok_remote, remote = self._run_git("remote", "get-url", "origin")
+        if ok_remote and remote:
+            return f"{first_line}\norigin: {remote}"
+        return first_line
+
+    def status_report(self) -> str:
+        if not self.is_git_repo():
+            return "当前工作区不是 Git 仓库。"
+
+        ok, status = self._run_git("status", "--short", "--branch")
+        if not ok:
+            return status
+
+        ok_remote, remote = self._run_git("remote", "get-url", "origin")
+        if ok_remote and remote:
+            return f"{status}\norigin: {remote}"
+        return status
+
+    def diff_report(self, *, target: str | None = None, stat_only: bool = False) -> str:
+        if not self.is_git_repo():
+            return "当前工作区不是 Git 仓库。"
+
+        args = ["diff"]
+        if stat_only:
+            args.append("--stat")
+        if target:
+            args.extend(["--", target])
+
+        ok, diff = self._run_git(*args)
+        if ok and diff:
+            return diff
+
+        if target:
+            status_ok, path_status = self._run_git("status", "--short", "--", target)
+            if status_ok and path_status.startswith("??"):
+                preview_path = (self.workspace_root / target).resolve(strict=False)
+                if preview_path.exists() and preview_path.is_file():
+                    preview = preview_path.read_text(encoding="utf-8")
+                    return (
+                        f"{target} 还没有被 Git 跟踪，所以 `git diff` 不会显示它。\n\n"
+                        f"[untracked file preview]\n{preview[:4000]}"
+                    )
+                return f"{target} 还没有被 Git 跟踪，所以 `git diff` 不会显示它。"
+
+        if stat_only:
+            status_ok, short_status = self._run_git("status", "--short")
+            if status_ok and short_status:
+                return f"(git diff --stat 没有输出)\n\n当前工作区变更：\n{short_status}"
+        return diff or "没有可显示的 diff。"
+
+
+def default_api_key(base_url: str) -> str:
+    if "localhost" in base_url or "127.0.0.1" in base_url:
+        return "ollama"
+    return ""
+
+
+def build_workspace_snapshot(workspace_root: Path) -> str:
     try:
-        ls = subprocess.run(
-            ["ls", "-la", cwd], capture_output=True, text=True, timeout=5
-        )
-        ls_output = ls.stdout.strip()
-        # 截断，避免目录太大吃 token
-        lines = ls_output.splitlines()
-        if len(lines) > 30:
-            ls_output = "\n".join(lines[:30]) + f"\n... (共 {len(lines)} 项，已截断)"
-    except Exception as e:
-        ls_output = f"(ls 失败: {e})"
-    return SYSTEM_PROMPT_TEMPLATE.format(cwd=cwd, ls_output=ls_output)
+        entries = sorted(workspace_root.iterdir(), key=lambda p: (p.is_file(), p.name))
+    except OSError as exc:
+        return f"(读取目录失败: {exc})"
+
+    preview = []
+    for item in entries[:30]:
+        suffix = "/" if item.is_dir() else ""
+        preview.append(f"- {item.name}{suffix}")
+    if len(entries) > 30:
+        preview.append(f"- ...（共 {len(entries)} 项，已截断）")
+    return "\n".join(preview) if preview else "(空目录)"
 
 
-client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+def load_project_guide(workspace_root: Path) -> str:
+    for filename in PROJECT_GUIDE_FILES:
+        path = workspace_root / filename
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            return f"## 项目约定（来自 {filename}）\n(读取失败: {exc})"
+
+        if len(text) > MAX_PROJECT_GUIDE_CHARS:
+            text = (
+                text[:MAX_PROJECT_GUIDE_CHARS]
+                + f"\n... [项目约定过长，已截断，共 {len(text)} 字符]"
+            )
+        return f"## 项目约定（来自 {filename}）\n{text}"
+
+    return ""
 
 
-_TOOL_NAMES = set(EXECUTORS.keys())
+def build_system_prompt(config: AgentConfig, runtime: ToolRuntime) -> str:
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        workspace_root=config.workspace_root,
+        workspace_snapshot=build_workspace_snapshot(config.workspace_root),
+        tool_summary=runtime.tool_summary(),
+        project_guide=load_project_guide(config.workspace_root),
+    )
 
 
 def _find_top_level_json_objects(text: str):
-    """用 raw_decode 顺序扫描，找出 text 里所有合法的顶层 JSON 对象。
-
-    比大括号配对更健壮——能正确处理字符串里的 `{` `}`、转义等边界情况。
-    """
+    """顺序扫描，找出 text 里所有合法的顶层 JSON 对象。"""
     decoder = json.JSONDecoder()
     results = []
     i = 0
     n = len(text)
     while i < n:
-        # 跳到下一个 '{'
         brace = text.find("{", i)
         if brace == -1:
             break
@@ -114,153 +238,405 @@ def _find_top_level_json_objects(text: str):
             results.append(obj)
             i = end
         except json.JSONDecodeError:
-            i = brace + 1  # 不是合法 JSON 开头，继续找
+            i = brace + 1
     return results
 
 
-def extract_fake_tool_calls(content: str):
-    """小模型经常把 tool call 伪装成普通文本输出。尝试从 content 里抠出来。
-
-    支持的格式：
-      1. <tool_call>{...}</tool_call>      Qwen 官方
-      2. ```json\n{...}\n```               代码块包裹
-      3. 多个串联的 JSON 对象（可能被普通文字包围）
-
-    返回 [(name, args_dict), ...]。没解析出来返回 []。
-    """
+def extract_fake_tool_calls(content: str, tool_names: set[str]):
+    """从普通文本里抠出模型伪装的 tool call。"""
     if not content:
         return []
 
-    # 提取候选 JSON 文本片段
     fragments = []
 
-    # 1. <tool_call> 包裹的
-    for m in re.finditer(r"<tool_call>(.*?)</tool_call>", content, re.DOTALL):
-        fragments.append(m.group(1))
+    for match in re.finditer(r"<tool_call>(.*?)</tool_call>", content, re.DOTALL):
+        fragments.append(match.group(1))
 
-    # 2. 代码块包裹的
-    for m in re.finditer(r"```(?:json)?\s*(.*?)```", content, re.DOTALL):
-        fragments.append(m.group(1))
+    for match in re.finditer(r"```(?:json)?\s*(.*?)```", content, re.DOTALL):
+        fragments.append(match.group(1))
 
-    # 3. 如果上面都没命中，把整个 content 当 fragment 扫描
     if not fragments:
         fragments.append(content)
 
-    # 对每个 fragment 找出所有顶层 JSON 对象
     results = []
-    for frag in fragments:
-        for obj in _find_top_level_json_objects(frag):
+    for fragment in fragments:
+        for obj in _find_top_level_json_objects(fragment):
             if not isinstance(obj, dict):
                 continue
             name = obj.get("name")
             args = obj.get("arguments") or obj.get("parameters") or {}
-            if name in _TOOL_NAMES and isinstance(args, dict):
+            if name in tool_names and isinstance(args, dict):
                 results.append((name, args))
     return results
 
 
 def pretty_tool_call(name: str, args: dict) -> str:
-    """把工具调用打印成人类能读的一行。"""
     args_str = json.dumps(args, ensure_ascii=False)
-    if len(args_str) > 120:
-        args_str = args_str[:120] + "..."
+    if len(args_str) > 140:
+        args_str = args_str[:140] + "..."
     return f"→ {name}({args_str})"
 
 
 def pretty_tool_result(result: str) -> str:
-    """工具结果太长就截断显示。"""
-    if len(result) > 300:
-        return result[:300] + f"\n... [共 {len(result)} 字符]"
+    if len(result) > 400:
+        return result[:400] + f"\n... [共 {len(result)} 字符]"
     return result
 
 
-def run(task: str) -> None:
-    messages = [
-        {"role": "system", "content": build_system_prompt()},
-        {"role": "user", "content": task},
-    ]
+class AgentSession:
+    def __init__(self, config: AgentConfig):
+        self.config = config
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "缺少 openai 依赖，请先执行 `pip install -r requirements.txt`"
+            ) from exc
 
-    for turn in range(1, MAX_TURNS + 1):
-        print(f"\n--- turn {turn} ---")
-
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            tools=TOOL_SCHEMAS,
-            tool_choice="auto",
-            # Ollama 扩展：把 num_ctx 传下去。OpenAI SDK 的 extra_body 会透传。
-            extra_body={"options": {"num_ctx": NUM_CTX}},
+        self.client = OpenAI(base_url=config.base_url, api_key=config.api_key)
+        self.runtime = ToolRuntime(
+            workspace_root=config.workspace_root,
+            auto_approve=config.auto_approve,
+            command_timeout=config.command_timeout,
         )
-        msg = response.choices[0].message
+        self.inspector = WorkspaceInspector(config.workspace_root)
+        self.tool_names = self.runtime.tool_names()
+        self.activity_log: list[ActivityEntry] = []
+        self.reset()
 
-        # ----- 标准化 tool_calls -----
-        # 优先用模型走 tool_calls 通道返回的。没有就尝试从 content 里抠伪装调用。
-        tool_calls = []
-        if msg.tool_calls:
-            for tc in msg.tool_calls:
-                try:
-                    args = json.loads(tc.function.arguments)
-                except json.JSONDecodeError:
-                    args = {}
-                tool_calls.append({"id": tc.id, "name": tc.function.name, "args": args})
-        else:
-            for name, args in extract_fake_tool_calls(msg.content):
-                tool_calls.append(
-                    {"id": f"fake_{uuid.uuid4().hex[:8]}", "name": name, "args": args}
-                )
-            if tool_calls:
-                print("[note] 从文本里解析到 tool call（模型没走 tool_calls 通道）")
+    def reset(self) -> None:
+        self.messages = [
+            {
+                "role": "system",
+                "content": build_system_prompt(self.config, self.runtime),
+            }
+        ]
+        self.activity_log.clear()
+        self.log_activity("system", "会话已初始化")
 
-        # ----- 写回 assistant 消息 -----
-        # 构造规范的 tool_calls 结构塞回历史，这样下一轮模型看到的对话是一致的
-        assistant_msg = {"role": "assistant", "content": msg.content or ""}
-        if tool_calls:
-            assistant_msg["tool_calls"] = [
-                {
-                    "id": tc["id"],
-                    "type": "function",
-                    "function": {
-                        "name": tc["name"],
-                        "arguments": json.dumps(tc["args"], ensure_ascii=False),
-                    },
-                }
-                for tc in tool_calls
-            ]
-            # 如果工具调用是从 content 抠出来的，清空 content 避免模型重复输出
-            if not msg.tool_calls:
-                assistant_msg["content"] = ""
-        messages.append(assistant_msg)
+    def log_activity(self, kind: str, summary: str) -> None:
+        entry = ActivityEntry(
+            timestamp=datetime.now().strftime("%H:%M:%S"),
+            kind=kind,
+            summary=summary,
+        )
+        self.activity_log.append(entry)
+        if len(self.activity_log) > 200:
+            self.activity_log = self.activity_log[-200:]
 
-        # ----- 显示 -----
-        if msg.content and not (tool_calls and not msg.tool_calls):
-            print(f"[assistant] {msg.content}")
+    def add_user_message(self, text: str) -> None:
+        self.messages.append({"role": "user", "content": text})
+        self.log_activity("user", text[:200])
 
-        # 没有工具调用 = 任务结束
-        if not tool_calls:
-            print("\n=== 任务结束 ===")
-            return
+    def run_until_idle(self) -> bool:
+        for turn in range(1, self.config.max_turns + 1):
+            print(f"\n--- turn {turn} ---")
 
-        # ----- 执行工具 -----
-        for tc in tool_calls:
-            print(pretty_tool_call(tc["name"], tc["args"]))
-            result = execute_tool(tc["name"], tc["args"])
-            print(pretty_tool_result(result))
-
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": result,
-                }
+            response = self.client.chat.completions.create(
+                model=self.config.model,
+                messages=self.messages,
+                tools=self.runtime.tool_schemas,
+                tool_choice="auto",
+                extra_body={"options": {"num_ctx": self.config.num_ctx}},
             )
+            msg = response.choices[0].message
 
-    print(f"\n=== 达到最大轮数 {MAX_TURNS}，强制停止 ===")
+            tool_calls = []
+            if msg.tool_calls:
+                for tool_call in msg.tool_calls:
+                    try:
+                        args = json.loads(tool_call.function.arguments)
+                    except json.JSONDecodeError:
+                        args = {}
+                    tool_calls.append(
+                        {
+                            "id": tool_call.id,
+                            "name": tool_call.function.name,
+                            "args": args,
+                        }
+                    )
+            else:
+                for name, args in extract_fake_tool_calls(
+                    msg.content or "", self.tool_names
+                ):
+                    tool_calls.append(
+                        {
+                            "id": f"fake_{uuid.uuid4().hex[:8]}",
+                            "name": name,
+                            "args": args,
+                        }
+                    )
+                if tool_calls:
+                    print("[note] 从普通文本里解析到 tool call")
+
+            assistant_msg = {"role": "assistant", "content": msg.content or ""}
+            if tool_calls:
+                assistant_msg["tool_calls"] = [
+                    {
+                        "id": tool_call["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tool_call["name"],
+                            "arguments": json.dumps(
+                                tool_call["args"], ensure_ascii=False
+                            ),
+                        },
+                    }
+                    for tool_call in tool_calls
+                ]
+                if not msg.tool_calls:
+                    assistant_msg["content"] = ""
+            self.messages.append(assistant_msg)
+
+            if msg.content and not (tool_calls and not msg.tool_calls):
+                print(f"[assistant] {msg.content}")
+                self.log_activity("assistant", msg.content[:200])
+
+            if not tool_calls:
+                print("\n=== 任务结束 ===")
+                return True
+
+            for tool_call in tool_calls:
+                print(pretty_tool_call(tool_call["name"], tool_call["args"]))
+                self.log_activity(
+                    "tool_call",
+                    pretty_tool_call(tool_call["name"], tool_call["args"]),
+                )
+                result = self.runtime.execute_tool(tool_call["name"], tool_call["args"])
+                print(pretty_tool_result(result))
+                self.log_activity(
+                    "tool_result",
+                    pretty_tool_result(result).replace("\n", " ")[:200],
+                )
+
+                self.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": result,
+                    }
+                )
+
+        print(f"\n=== 达到最大轮数 {self.config.max_turns}，强制停止 ===")
+        return False
+
+    def handle_user_turn(self, text: str) -> bool:
+        self.add_user_message(text)
+        return self.run_until_idle()
+
+    def handle_slash_command(self, raw: str) -> bool:
+        parts = shlex.split(raw)
+        command = parts[0]
+        args = parts[1:]
+        self.log_activity("slash", raw)
+
+        if command in {"/quit", "/exit"}:
+            print("bye")
+            return False
+
+        if command == "/help":
+            print(
+                "\n".join(
+                    [
+                        "可用命令：",
+                        "  /help   查看帮助",
+                        "  /tools  查看工具说明",
+                        "  /pwd    显示工作区根目录",
+                        "  /status 查看当前 Git 状态",
+                        "  /branch 查看当前分支",
+                        "  /diff [--stat|path] 查看改动",
+                        "  /history [N] 查看最近会话动作",
+                        "  /approve [on|off|status] 查看或切换审批模式",
+                        "  /clear  清空当前会话历史",
+                        "  /quit   退出",
+                    ]
+                )
+            )
+            return True
+
+        if command == "/tools":
+            print(self.runtime.tool_summary())
+            return True
+
+        if command == "/pwd":
+            print(self.config.workspace_root)
+            return True
+
+        if command == "/status":
+            print(self.inspector.status_report())
+            return True
+
+        if command == "/branch":
+            print(self.inspector.branch_report())
+            return True
+
+        if command == "/diff":
+            stat_only = False
+            target = None
+            if args:
+                if args[0] == "--stat":
+                    stat_only = True
+                    if len(args) > 1:
+                        target = args[1]
+                else:
+                    target = args[0]
+            print(_truncate_cli_output(self.inspector.diff_report(target=target, stat_only=stat_only)))
+            return True
+
+        if command == "/history":
+            limit = 20
+            if args:
+                try:
+                    limit = max(1, int(args[0]))
+                except ValueError:
+                    print("用法: /history [N]")
+                    return True
+
+            entries = self.activity_log[-limit:]
+            if not entries:
+                print("当前没有会话动作。")
+                return True
+            print(
+                "\n".join(
+                    f"{entry.timestamp} [{entry.kind}] {entry.summary}" for entry in entries
+                )
+            )
+            return True
+
+        if command == "/approve":
+            if not args or args[0] == "status":
+                mode = "on" if self.runtime.auto_approve else "off"
+                print(f"auto-approve: {mode}")
+                return True
+            if args[0] == "on":
+                self.runtime.auto_approve = True
+                print("auto-approve: on")
+                return True
+            if args[0] == "off":
+                self.runtime.auto_approve = False
+                print("auto-approve: off")
+                return True
+            print("用法: /approve [on|off|status]")
+            return True
+
+        if command == "/clear":
+            self.reset()
+            print("会话历史已清空。")
+            return True
+
+        print(f"未知命令: {command}，输入 /help 查看帮助。")
+        return True
+
+    def repl(self) -> None:
+        print(
+            "\n".join(
+                [
+                    f"my-agent REPL",
+                    f"model: {self.config.model}",
+                    f"workspace: {self.config.workspace_root}",
+                    "输入 /help 查看命令，输入 /status 看仓库状态，输入 /quit 退出。",
+                ]
+            )
+        )
+
+        while True:
+            try:
+                user_input = input("\nuser> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nbye")
+                return
+
+            if not user_input:
+                continue
+
+            if user_input.startswith("/"):
+                if not self.handle_slash_command(user_input):
+                    return
+                continue
+
+            try:
+                self.handle_user_turn(user_input)
+            except KeyboardInterrupt:
+                print("\n[interrupted]")
+            except Exception as exc:
+                print(f"\n[error] {type(exc).__name__}: {exc}")
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="本地最小编码 agent")
+    parser.add_argument("task", nargs="*", help="一次性任务描述；不传则进入 REPL")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="模型名")
+    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="OpenAI 兼容 API 地址")
+    parser.add_argument("--api-key", default=None, help="API key；本地 Ollama 可留空")
+    parser.add_argument(
+        "--cwd",
+        default=".",
+        help="工作区根目录。所有相对路径都以这里为基准。",
+    )
+    parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help="上下文窗口")
+    parser.add_argument(
+        "--max-turns", type=int, default=DEFAULT_MAX_TURNS, help="单个用户任务最多迭代轮数"
+    )
+    parser.add_argument(
+        "--command-timeout",
+        type=int,
+        default=DEFAULT_COMMAND_TIMEOUT,
+        help="run_command 超时时间（秒）",
+    )
+    parser.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="跳过写文件/执行命令前的确认提示",
+    )
+    parser.add_argument(
+        "--repl",
+        action="store_true",
+        help="强制进入 REPL，即使传了任务文本",
+    )
+    return parser.parse_args(argv)
+
+
+def build_config(args: argparse.Namespace) -> AgentConfig:
+    workspace_root = Path(args.cwd).expanduser().resolve()
+    api_key = args.api_key if args.api_key is not None else default_api_key(args.base_url)
+    return AgentConfig(
+        model=args.model,
+        base_url=args.base_url,
+        api_key=api_key,
+        num_ctx=args.num_ctx,
+        max_turns=args.max_turns,
+        workspace_root=workspace_root,
+        auto_approve=args.auto_approve,
+        command_timeout=args.command_timeout,
+    )
+
+
+def _truncate_cli_output(text: str, limit: int = 8000) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n... [输出过长，已截断，共 {len(text)} 字符]"
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    config = build_config(args)
+    session = AgentSession(config)
+
+    if args.repl or not args.task:
+        session.repl()
+        return 0
+
+    task = " ".join(args.task)
+    try:
+        session.handle_user_turn(task)
+    except KeyboardInterrupt:
+        print("\n[interrupted]")
+        return 130
+    except Exception as exc:
+        print(f"\n[error] {type(exc).__name__}: {exc}")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("用法: python agent.py \"你的任务描述\"")
-        print("例子: python agent.py \"列出当前目录的 py 文件\"")
-        sys.exit(1)
-    task = " ".join(sys.argv[1:])
-    run(task)
+    raise SystemExit(main())

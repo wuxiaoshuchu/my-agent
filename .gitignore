@@ -1,0 +1,5 @@
+.venv/
+.venv-cli-test/
+*.egg-info/
+__pycache__/
+.pytest_cache/
