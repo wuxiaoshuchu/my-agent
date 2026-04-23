@@ -4,6 +4,29 @@
 
 ## 2026-04-23
 
+### 增加模型可观察性、默认模型配置和本机基线
+
+- 新增 [jarvis.config.json](jarvis.config.json)，把默认 `model / base_url / num_ctx` 真正写进仓库。
+- 新增 [model-baseline.md](model-baseline.md)，记录这台 `M1 + 16GB` 机器上的本地模型基线和下一批候选模型。
+- 新增 [runtime_config.py](runtime_config.py)，把运行时配置解析、本地模型发现和配置写回逻辑从 `agent.py` 里拆了出来。
+- `jarvis` 现在支持 `/model`、`/model use <name>`、`/model set <name>`、`/model ctx <N>`。
+- CLI 参数现在会按“命令行 > 工作区配置 > 内置默认值”的顺序解析。
+- 补充测试，覆盖工作区运行时配置优先级、配置写回和 `ollama list` 输出解析。
+- 顺手修正安装元数据，把新增模块纳入打包清单。
+
+### 为什么这样改
+
+- 这是 `way-to-claw-code.md` 里 `P0` 最值的一步：先让 agent 看清自己在用什么模型，再让默认模型切换变成仓库能力。
+- 让模型选择不再只是临时 CLI 参数，而是项目级、可追踪、可继承的配置。
+- 让以后做本地 benchmark 时，有地方记录“这台机器上什么模型值得继续试”。
+- 顺手把运行时配置从 `agent.py` 拆出去，也是在为后面的架构演进做准备。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `./.venv/bin/jarvis --help`
+- `python3 agent.py --repl </dev/null`
+
 ### 增加局部编辑工具和 patch 预览
 
 - 新增 `edit_file` 工具，支持按精确文本片段做局部编辑。

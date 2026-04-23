@@ -12,8 +12,11 @@ from agent import (
     AgentConfig,
     AgentSession,
     build_system_prompt,
+    build_config,
     extract_fake_tool_calls,
+    parse_args,
 )
+from runtime_config import RuntimeConfigSources
 from tools import ToolRuntime
 
 
@@ -46,6 +49,12 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
                 workspace_root=workspace,
                 auto_approve=True,
                 command_timeout=5,
+                workspace_config_path=workspace / "jarvis.config.json",
+                runtime_sources=RuntimeConfigSources(
+                    model="default",
+                    base_url="default",
+                    num_ctx="default",
+                ),
             )
             runtime = ToolRuntime(workspace, auto_approve=True, command_timeout=5)
 
@@ -91,6 +100,37 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
             self.assertIn("本轮摘要", summary)
             self.assertIn("please update tracked.txt", summary)
             self.assertIn("建议 commit message", summary)
+
+    def test_build_config_prefers_workspace_runtime_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "jarvis.config.json").write_text(
+                '{\n  "model": "qwen2.5-coder:14b",\n  "base_url": "http://localhost:11434/v1",\n  "num_ctx": 24576\n}\n',
+                encoding="utf-8",
+            )
+
+            args = parse_args(["--cwd", str(workspace)])
+            config = build_config(args)
+
+            self.assertEqual(config.model, "qwen2.5-coder:14b")
+            self.assertEqual(config.num_ctx, 24576)
+            self.assertEqual(config.runtime_sources.model, "workspace:jarvis.config.json")
+
+    def test_build_config_allows_cli_override_over_workspace_runtime_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "jarvis.config.json").write_text(
+                '{\n  "model": "qwen2.5-coder:14b"\n}\n',
+                encoding="utf-8",
+            )
+
+            args = parse_args(
+                ["--cwd", str(workspace), "--model", "deepseek-coder-v2:16b"]
+            )
+            config = build_config(args)
+
+            self.assertEqual(config.model, "deepseek-coder-v2:16b")
+            self.assertEqual(config.runtime_sources.model, "cli")
 
 
 if __name__ == "__main__":

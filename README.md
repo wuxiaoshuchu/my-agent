@@ -15,6 +15,7 @@
 - 增加了 `/summary` 和 `/commit`，可以回看本轮成果并直接提交
 - 仓库现在有 [HARNESS.md](HARNESS.md) 和 [CHANGELOG.md](CHANGELOG.md)，方便 agent 继承规则和回看成长史
 - 仓库现在还有 [way-to-claw-code.md](way-to-claw-code.md)，用于记录长期路线图和后续待办
+- 仓库现在还有 [jarvis.config.json](jarvis.config.json) 和 [model-baseline.md](model-baseline.md)，用于固定默认模型和记录本机模型基线
 - 自带 `.vscode` 配置，可以在 VS Code 里一键启动 `jarvis`
 - REPL 现在有启动 banner、Git 状态头和动态提示符，更接近真正的 CLI 工具
 - 增加了 `edit_file` 工具和 `/patch` 命令，可以做局部编辑并直接预览改动
@@ -28,6 +29,26 @@ brew install ollama
 ollama serve &
 ollama pull qwen2.5-coder:7b
 ```
+
+## 默认运行时配置
+
+仓库根目录现在有一个 [jarvis.config.json](jarvis.config.json)：
+
+```json
+{
+  "model": "qwen2.5-coder:7b",
+  "base_url": "http://localhost:11434/v1",
+  "num_ctx": 16384
+}
+```
+
+`jarvis` 启动时会按这个顺序解析运行时设置：
+
+1. CLI 参数
+2. 工作区里的 `jarvis.config.json`
+3. 内置默认值
+
+所以现在你不需要每次都手写 `--model`，而且也能把默认模型真正保存进仓库。
 
 ## 安装
 
@@ -70,6 +91,12 @@ jarvis [main +2 m3 ask]>
 jarvis --cwd ~/Desktop/claw-code
 ```
 
+如果你只想看当前模型配置和本地已安装模型：
+
+```text
+/model
+```
+
 ### 2. 执行一次性任务
 
 ```bash
@@ -96,6 +123,7 @@ python agent.py
 /help   查看帮助
 /tools  查看工具说明
 /pwd    显示当前工作区根目录
+/model  查看或切换模型配置
 /status 查看当前 Git 状态
 /branch 查看当前分支
 /diff   查看当前 diff
@@ -109,6 +137,20 @@ python agent.py
 /clear  清空会话历史
 /quit   退出
 ```
+
+`/model` 支持：
+
+```text
+/model
+/model use qwen2.5-coder:14b
+/model set qwen2.5-coder:14b
+/model ctx 24576
+```
+
+- `/model`：显示当前模型、来源、base URL、num_ctx 和本地 Ollama 模型列表
+- `/model use`：只切换当前会话
+- `/model set`：切换并写入 `jarvis.config.json`
+- `/model ctx`：更新默认上下文窗口并写入 `jarvis.config.json`
 
 ## VS Code 里启动
 
@@ -221,6 +263,12 @@ jarvis
 jarvis --model qwen2.5-coder:14b
 ```
 
+如果你希望把默认模型直接改进仓库，不想每次都传 CLI 参数，直接在 REPL 里：
+
+```text
+/model set qwen2.5-coder:14b
+```
+
 如果换成别的 OpenAI 兼容服务，也可以改：
 
 ```bash
@@ -229,3 +277,5 @@ jarvis \
   --api-key dummy \
   --model your-model-name
 ```
+
+如果你想回看这台机器的模型建议和当前基线，直接看 [model-baseline.md](model-baseline.md)。

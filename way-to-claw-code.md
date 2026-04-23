@@ -66,9 +66,9 @@
 ### 待办
 
 - [ ] 修复本机 `ollama` 运行时稳定性，至少保证 `ollama list`、`ollama run`、OpenAI 兼容接口可用
-- [ ] 新增 `/model` 或等价命令，显示当前模型、base URL、context 设置
-- [ ] 建一个最小模型 benchmark 文档，记录这台机器上的可用模型与体验
-- [ ] 给 `jarvis` 增加默认模型切换配置，而不是只能靠命令行参数临时覆盖
+- [x] 新增 `/model` 或等价命令，显示当前模型、base URL、context 设置
+- [x] 建一个最小模型 benchmark 文档，记录这台机器上的可用模型与体验
+- [x] 给 `jarvis` 增加默认模型切换配置，而不是只能靠命令行参数临时覆盖
 
 ### 当前模型建议
 
@@ -225,7 +225,7 @@
 如果未来 agent 重新进入这个仓库，不知道先做什么，默认先做下面这 3 件事中的第 1 件：
 
 - [ ] 检查并修复本机 `ollama` 稳定性问题
-- [ ] 建立模型 benchmark 文档，比较 `qwen2.5-coder:7b / 14b` 与 `deepseek-coder-v2:16b`
+- [ ] 继续补 benchmark 数据，比较 `qwen2.5-coder:7b / 14b` 与 `deepseek-coder-v2:16b`
 - [ ] 给 `jarvis` 增加最小 `compact` 机制设计草案
 
 ## 不要误判的事情

@@ -20,6 +20,18 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from runtime_config import (
+    CONFIG_FILENAME,
+    RuntimeConfigSources,
+    describe_runtime_provider,
+    list_local_models,
+    load_workspace_runtime_config,
+    normalize_positive_int,
+    normalize_string_setting,
+    resolve_runtime_value,
+    save_workspace_runtime_config,
+    workspace_config_path,
+)
 from tools import ToolRuntime
 from workspace_inspector import RepoStatusSnapshot, WorkspaceInspector
 
@@ -78,6 +90,8 @@ class AgentConfig:
     workspace_root: Path
     auto_approve: bool
     command_timeout: int
+    workspace_config_path: Path
+    runtime_sources: RuntimeConfigSources
 
 
 @dataclass
@@ -369,7 +383,7 @@ class AgentSession:
             style_text(f"workspace: {self.config.workspace_root}", color="bold", use_color=use_color),
             f"model: {self.config.model} | approval: {'auto' if self.runtime.auto_approve else 'ask'}",
             format_git_summary(snapshot),
-            "commands: /help /patch /summary /status /diff /commit /quit",
+            "commands: /help /model /patch /summary /status /diff /commit /quit",
         ]
         return "\n".join(lines)
 
@@ -402,6 +416,92 @@ class AgentSession:
         if ok:
             self.log_activity("commit", commit_message)
         return output
+
+    def model_report(self) -> str:
+        lines = [
+            "模型运行时",
+            "",
+            f"当前模型: {self.config.model}",
+            f"模型来源: {self.config.runtime_sources.model}",
+            f"base URL: {self.config.base_url}",
+            f"base URL 来源: {self.config.runtime_sources.base_url}",
+            f"provider: {describe_runtime_provider(self.config.base_url)}",
+            f"num_ctx: {self.config.num_ctx}",
+            f"num_ctx 来源: {self.config.runtime_sources.num_ctx}",
+            f"工作区配置: {self.config.workspace_config_path}",
+        ]
+
+        models, error = list_local_models()
+        lines.append("")
+        lines.append("本地 Ollama 模型：")
+        if error:
+            lines.append(f"- {error}")
+        elif not models:
+            lines.append("- 当前没有检测到已安装模型。")
+        else:
+            for record in models:
+                marker = " [current]" if record.name == self.config.model else ""
+                lines.append(
+                    f"- {record.name} | {record.size} | {record.modified}{marker}"
+                )
+
+        lines.extend(
+            [
+                "",
+                "用法：",
+                "  /model 查看当前模型与本地模型列表",
+                "  /model use <name> 只切换当前会话",
+                f"  /model set <name> 切换并写入 {CONFIG_FILENAME}",
+                "  /model ctx <N> 更新并写入 num_ctx",
+            ]
+        )
+        return "\n".join(lines)
+
+    def use_model(self, model_name: str, *, persist: bool) -> str:
+        model_name = model_name.strip()
+        if not model_name:
+            return "模型名不能为空。"
+
+        self.config.model = model_name
+        if persist:
+            config_path = save_workspace_runtime_config(
+                self.config.workspace_root,
+                {"model": model_name},
+            )
+            self.config.workspace_config_path = config_path
+            self.config.runtime_sources = RuntimeConfigSources(
+                model=f"workspace:{config_path.name}",
+                base_url=self.config.runtime_sources.base_url,
+                num_ctx=self.config.runtime_sources.num_ctx,
+            )
+            self.log_activity("model", f"已切换默认模型到 {model_name}")
+            return (
+                f"已切换默认模型到 {model_name}\n"
+                f"配置文件: {config_path}"
+            )
+
+        self.config.runtime_sources = RuntimeConfigSources(
+            model="session",
+            base_url=self.config.runtime_sources.base_url,
+            num_ctx=self.config.runtime_sources.num_ctx,
+        )
+        self.log_activity("model", f"已切换当前会话模型到 {model_name}")
+        return f"已切换当前会话模型到 {model_name}"
+
+    def set_num_ctx(self, num_ctx: int) -> str:
+        self.config.num_ctx = num_ctx
+        config_path = save_workspace_runtime_config(
+            self.config.workspace_root,
+            {"num_ctx": num_ctx},
+        )
+        self.config.workspace_config_path = config_path
+        self.config.runtime_sources = RuntimeConfigSources(
+            model=self.config.runtime_sources.model,
+            base_url=self.config.runtime_sources.base_url,
+            num_ctx=f"workspace:{config_path.name}",
+        )
+        self.log_activity("model", f"已更新默认 num_ctx 到 {num_ctx}")
+        return f"已更新默认 num_ctx 到 {num_ctx}\n配置文件: {config_path}"
 
     def add_user_message(self, text: str) -> None:
         self.messages.append({"role": "user", "content": text})
@@ -521,6 +621,7 @@ class AgentSession:
                         "  /help   查看帮助",
                         "  /tools  查看工具说明",
                         "  /pwd    显示工作区根目录",
+                        "  /model  查看或切换模型配置",
                         "  /status 查看当前 Git 状态",
                         "  /branch 查看当前分支",
                         "  /diff [--stat|path] 查看改动",
@@ -542,6 +643,41 @@ class AgentSession:
 
         if command == "/pwd":
             print(self.config.workspace_root)
+            return True
+
+        if command == "/model":
+            if not args:
+                print(_truncate_cli_output(self.model_report()))
+                return True
+
+            subcommand = args[0]
+            if subcommand == "use":
+                if len(args) != 2:
+                    print("用法: /model use <name>")
+                    return True
+                print(self.use_model(args[1], persist=False))
+                return True
+
+            if subcommand == "set":
+                if len(args) != 2:
+                    print("用法: /model set <name>")
+                    return True
+                print(self.use_model(args[1], persist=True))
+                return True
+
+            if subcommand == "ctx":
+                if len(args) != 2:
+                    print("用法: /model ctx <N>")
+                    return True
+                try:
+                    num_ctx = normalize_positive_int(args[1], field_name="num_ctx")
+                except ValueError as exc:
+                    print(exc)
+                    return True
+                print(self.set_num_ctx(num_ctx))
+                return True
+
+            print("用法: /model [use <name> | set <name> | ctx <N>]")
             return True
 
         if command == "/status":
@@ -659,15 +795,24 @@ class AgentSession:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="本地最小编码 agent")
     parser.add_argument("task", nargs="*", help="一次性任务描述；不传则进入 REPL")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="模型名")
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="OpenAI 兼容 API 地址")
+    parser.add_argument("--model", default=None, help="模型名；默认读取 jarvis.config.json 或内置默认值")
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="OpenAI 兼容 API 地址；默认读取 jarvis.config.json 或内置默认值",
+    )
     parser.add_argument("--api-key", default=None, help="API key；本地 Ollama 可留空")
     parser.add_argument(
         "--cwd",
         default=".",
         help="工作区根目录。所有相对路径都以这里为基准。",
     )
-    parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help="上下文窗口")
+    parser.add_argument(
+        "--num-ctx",
+        type=int,
+        default=None,
+        help="上下文窗口；默认读取 jarvis.config.json 或内置默认值",
+    )
     parser.add_argument(
         "--max-turns", type=int, default=DEFAULT_MAX_TURNS, help="单个用户任务最多迭代轮数"
     )
@@ -692,16 +837,48 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_config(args: argparse.Namespace) -> AgentConfig:
     workspace_root = Path(args.cwd).expanduser().resolve()
-    api_key = args.api_key if args.api_key is not None else default_api_key(args.base_url)
+    workspace_config = load_workspace_runtime_config(workspace_root)
+    config_path = workspace_config_path(workspace_root)
+    config_label = f"workspace:{config_path.name}"
+
+    model_value, model_source = resolve_runtime_value(
+        cli_value=args.model,
+        config_value=workspace_config.get("model"),
+        default=DEFAULT_MODEL,
+        config_label=config_label,
+    )
+    base_url_value, base_url_source = resolve_runtime_value(
+        cli_value=args.base_url,
+        config_value=workspace_config.get("base_url"),
+        default=DEFAULT_BASE_URL,
+        config_label=config_label,
+    )
+    num_ctx_value, num_ctx_source = resolve_runtime_value(
+        cli_value=args.num_ctx,
+        config_value=workspace_config.get("num_ctx"),
+        default=DEFAULT_NUM_CTX,
+        config_label=config_label,
+    )
+
+    model = normalize_string_setting(model_value, field_name="model")
+    base_url = normalize_string_setting(base_url_value, field_name="base_url")
+    num_ctx = normalize_positive_int(num_ctx_value, field_name="num_ctx")
+    api_key = args.api_key if args.api_key is not None else default_api_key(base_url)
     return AgentConfig(
-        model=args.model,
-        base_url=args.base_url,
+        model=model,
+        base_url=base_url,
         api_key=api_key,
-        num_ctx=args.num_ctx,
+        num_ctx=num_ctx,
         max_turns=args.max_turns,
         workspace_root=workspace_root,
         auto_approve=args.auto_approve,
         command_timeout=args.command_timeout,
+        workspace_config_path=config_path,
+        runtime_sources=RuntimeConfigSources(
+            model=model_source,
+            base_url=base_url_source,
+            num_ctx=num_ctx_source,
+        ),
     )
 
 
@@ -712,9 +889,13 @@ def _truncate_cli_output(text: str, limit: int = 8000) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    config = build_config(args)
-    session = AgentSession(config)
+    try:
+        args = parse_args(argv)
+        config = build_config(args)
+        session = AgentSession(config)
+    except Exception as exc:
+        print(f"[error] {type(exc).__name__}: {exc}")
+        return 1
 
     if args.repl or not args.task:
         session.repl()
