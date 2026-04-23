@@ -1,0 +1,81 @@
+{
+  "model": "qwen2.5-coder:7b",
+  "workspace_root": "/Users/wuxiaoshuchu/Desktop/my-agent",
+  "started_at": "2026-04-24T00:09:02",
+  "finished_at": "2026-04-24T00:11:08",
+  "short_timeout_s": 20,
+  "long_timeout_s": 120,
+  "results": [
+    {
+      "case_id": "ollama_ps_before",
+      "status": "ok",
+      "duration_ms": 558,
+      "summary": "returncode=0",
+      "detail": "NAME                ID              SIZE      PROCESSOR    CONTEXT    UNTIL              \nqwen2.5-coder:7b    dae161e27b0e    4.9 GB    100% GPU     4096       4 minutes from now"
+    },
+    {
+      "case_id": "api_version",
+      "status": "ok",
+      "duration_ms": 13,
+      "summary": "HTTP request completed",
+      "detail": "{\"version\":\"0.21.0\"}"
+    },
+    {
+      "case_id": "api_tags",
+      "status": "ok",
+      "duration_ms": 6,
+      "summary": "HTTP request completed",
+      "detail": "{\"models\":[{\"name\":\"qwen2.5-coder:7b\",\"model\":\"qwen2.5-coder:7b\",\"modified_at\":\"2026-04-23T03:18:28.651906218+09:00\",\"size\":4683087561,\"digest\":\"dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"qwen2\",\"families\":[\"qwen2\"],\"parameter_size\":\"7.6B\",\"quantization_level\":\"Q4_K_M\"}}]}"
+    },
+    {
+      "case_id": "direct_chat_minimal",
+      "status": "ok",
+      "duration_ms": 1931,
+      "summary": "HTTP request completed",
+      "detail": "{\"model\":\"qwen2.5-coder:7b\",\"created_at\":\"2026-04-23T15:09:04.758548Z\",\"message\":{\"role\":\"assistant\",\"content\":\"OK\"},\"done\":true,\"done_reason\":\"stop\",\"total_duration\":1926585667,\"load_duration\":293067209,\"prompt_eval_count\":34,\"prompt_eval_duration\":1179577416,\"eval_count\":2,\"eval_duration\":432794458}"
+    },
+    {
+      "case_id": "openai_minimal",
+      "status": "ok",
+      "duration_ms": 2946,
+      "summary": "content='OK'",
+      "detail": "{\n  \"id\": \"chatcmpl-840\",\n  \"choices\": [\n    {\n      \"finish_reason\": \"stop\",\n      \"index\": 0,\n      \"logprobs\": null,\n      \"message\": {\n        \"content\": \"OK\",\n        \"refusal\": null,\n        \"role\": \"assistant\",\n        \"annotations\": null,\n        \"audio\": null,\n        \"function_call\": null,\n        \"tool_calls\": null\n      }\n    }\n  ],\n  \"created\": 1776956947,\n  \"model\": \"qwen2.5-coder:7b\",\n  \"object\": \"chat.completion\",\n  \"service_tier\": null,\n  \"system_fingerprint\": \"fp_ollama\",\n  \"usage\": {\n    \"completion_tokens\": 2,\n    \"prompt_tokens\": 34,\n    \"total_tokens\": 36,\n    \"completion_tokens_details\": null,\n    \"prompt_tokens_details\": null\n  }\n}"
+    },
+    {
+      "case_id": "openai_agent_quick_prompt",
+      "status": "timeout",
+      "duration_ms": 20007,
+      "summary": "APITimeoutError: Request timed out.",
+      "detail": ""
+    },
+    {
+      "case_id": "agent_runtime_defaults_short",
+      "status": "timeout",
+      "duration_ms": 20022,
+      "summary": "APITimeoutError: Request timed out.",
+      "detail": ""
+    },
+    {
+      "case_id": "agent_runtime_defaults_long",
+      "status": "ok",
+      "duration_ms": 80330,
+      "summary": "completed with 1 tool calls; final_output='根据 `jarvis.config.json` 文件内容，default model、base_url 和 num_ctx 分别是：\\n\\n- **model**: qwen2.5-coder:7b\\n- **base_url**: http:/'",
+      "detail": "00:09:47 [system] 会话已初始化\n00:09:47 [user] 读取 jarvis.config.json，告诉我默认 model、base_url 和 num_ctx。请尽量简短，并保留原值。\n00:10:14 [tool_call] → read_file({\"path\": \"jarvis.config.json\"})\n00:10:14 [tool_result] [file] jarvis.config.json {   \"model\": \"qwen2.5-coder:7b\",   \"base_url\": \"http://localhost:11434/v1\",   \"num_ctx\": 16384 } \n00:11:08 [assistant] 根据 `jarvis.config.json` 文件内容，default model、base_url 和 num_ctx 分别是：\n\n- **model**: qwen2.5-coder:7b\n- **base_url**: http://localhost:11434/v1\n- **num_ctx**: 16384"
+    },
+    {
+      "case_id": "ollama_ps_after",
+      "status": "ok",
+      "duration_ms": 274,
+      "summary": "returncode=0",
+      "detail": "NAME                ID              SIZE      PROCESSOR    CONTEXT    UNTIL              \nqwen2.5-coder:7b    dae161e27b0e    4.9 GB    100% GPU     4096       4 minutes from now"
+    }
+  ],
+  "summary": {
+    "case_count": 9,
+    "ok_cases": 7,
+    "timeout_cases": 2,
+    "error_cases": 0,
+    "total_duration_ms": 126087
+  },
+  "root_cause": "Ollama 服务本身是健康的，瓶颈主要出现在 `jarvis` 风格 prompt + tools 下的首轮工具决策延迟；当前 20 秒超时对 qwen2.5-coder:7b 太紧。"
+}

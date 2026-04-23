@@ -87,6 +87,31 @@ python3 -u scripts/benchmark_agent.py \
 - 当前 `7b` 在这个 agent loop 和超时边界下不够稳
 - 下一步更值得优先做运行时诊断或直接拉 `14b / 16b` 做对比
 
+## 诊断结论
+
+这轮已经把问题继续往下拆开了：
+
+- 最新诊断报告：
+  - [diagnostic-results/2026-04-24_001108_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_001108_qwen2-5-coder-7b.md)
+  - [diagnostic-results/2026-04-24_001108_qwen2-5-coder-7b.json](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_001108_qwen2-5-coder-7b.json)
+
+- `Ollama` 服务本身是健康的：`/api/version`、`/api/tags`、最小直连 chat 都能正常返回
+- 最小直连 chat：
+  - 冷态大约 `6s`
+  - warm 后大约 `0.4s`
+- 最小 OpenAI 兼容 chat 也是秒级
+- 带完整 `jarvis` prompt + tools 的请求，在 `20s` 短超时下依然可能超时
+- 真正慢的是“真实 agent 任务的首轮工具决策”
+  - `读取 jarvis.config.json...` 这个 prompt，`qwen2.5-coder:7b` 大约要 `52s` 才产出第一条 fake tool call
+  - 同一任务在 `120s` 超时下可以完成，整轮大约 `63s`
+
+所以当前最接近真实根因的结论是：
+
+- 不是 `Ollama` 基础服务挂了
+- 不是 `localhost / OpenAI 兼容接口` 本身坏了
+- 主要是 `qwen2.5-coder:7b` 在当前 `jarvis` 风格 prompt + tools + 真实 repo 任务下，首轮工具规划太慢
+- 当前 benchmark 的 `20s` 超时会系统性错杀这类任务
+
 ## 常用命令
 
 ```bash

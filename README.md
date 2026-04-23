@@ -325,3 +325,23 @@ jarvis \
 当前首份真实结果已经在：
 
 - [benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/benchmark-results/2026-04-23_233206_qwen2-5-coder-7b.md)
+
+## 运行时诊断
+
+如果你怀疑问题不是 benchmark 脚手架，而是本机 `Ollama`、`OpenAI` 兼容层或者 agent loop 本身，可以直接跑：
+
+```bash
+python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b
+```
+
+这个脚本会顺序检查：
+
+- `ollama ps`
+- `api/version`
+- `api/tags`
+- 最小直连 chat
+- 最小 OpenAI 兼容 chat
+- `jarvis` 风格的 quick prompt
+- 同一个真实 agent 任务在短超时和长超时下的表现
+
+结果会写到 `diagnostic-results/`，方便以后回看“到底是运行时坏了，还是模型太慢，还是 agent prompt/tool 形态触发了延迟”。

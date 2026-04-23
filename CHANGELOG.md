@@ -4,6 +4,25 @@
 
 ## 2026-04-23
 
+### 增加运行时诊断脚本，并定位 7b 超时根因
+
+- 新增 [runtime_diagnostics.py](runtime_diagnostics.py)，抽出运行时诊断结果结构、根因归纳和 markdown 报告渲染。
+- 新增 [scripts/diagnose_runtime.py](scripts/diagnose_runtime.py)，可以顺序诊断 `Ollama` 服务、最小直连请求、OpenAI 兼容请求，以及真实 agent 任务在短超时/长超时下的表现。
+- 新增 [tests/test_runtime_diagnostics.py](tests/test_runtime_diagnostics.py)，覆盖诊断摘要和根因推断。
+- 更新 [README.md](README.md) 和 [model-baseline.md](model-baseline.md)，把这轮真实诊断结论写回仓库。
+
+### 为什么这样改
+
+- 现在我们已经不只是“知道 7b benchmark 会超时”，而是开始知道“超时到底发生在哪一层”。
+- 这能帮助后面决定到底该优先修 `Ollama`、调 timeout、收 prompt，还是直接换模型。
+- 也把这次排查方法留在仓库里，避免以后每次都从头排。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b`
+- `./.venv/bin/jarvis --help`
+
 ### 增加模型 benchmark 脚手架和首轮结果目录
 
 - 新增 [benchmark_harness.py](benchmark_harness.py)，把 benchmark 任务加载、结果评估、markdown 报告渲染和结果序列化抽成独立模块。
