@@ -11,6 +11,16 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent import WorkspaceInspector, build_prompt_label
 
 
+class CountingWorkspaceInspector(WorkspaceInspector):
+    def __init__(self, workspace_root: Path):
+        super().__init__(workspace_root, status_cache_ttl=60)
+        self.git_calls: list[tuple[str, ...]] = []
+
+    def _run_git(self, *args: str) -> tuple[bool, str]:
+        self.git_calls.append(args)
+        return super()._run_git(*args)
+
+
 class WorkspaceInspectorTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
@@ -104,6 +114,19 @@ class WorkspaceInspectorTests(unittest.TestCase):
         self.assertIn("ask", prompt)
         self.assertIn(snapshot.branch, prompt)
         self.assertTrue(prompt.startswith("jarvis ["))
+
+    def test_reuses_cached_git_status_for_related_queries(self):
+        inspector = CountingWorkspaceInspector(self.repo)
+
+        inspector.status_snapshot()
+        inspector.status_report()
+        inspector.changed_paths()
+        inspector.is_clean()
+
+        status_calls = [
+            args for args in inspector.git_calls if args == ("status", "--short", "--branch")
+        ]
+        self.assertEqual(len(status_calls), 1)
 
 
 if __name__ == "__main__":
