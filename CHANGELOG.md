@@ -4,6 +4,26 @@
 
 ## 2026-04-24
 
+### 进入 P1，给 jarvis 增加最小 context engine
+
+- 新增 [context_engine.py](context_engine.py)，把会话长度估算、自动 compact、`session memory` 和 memory 渲染逻辑从 [agent.py](agent.py) 里拆出来。
+- 更新 [agent.py](agent.py)，让 REPL 支持 `/compact`，在长对话里自动压缩较早 turn，并把 `HARNESS.md`、[way-to-claw-code.md](way-to-claw-code.md) 和 compact 后的 active goal 一起重新注入 system prompt。
+- 更新 [README.md](README.md) 和 [way-to-claw-code.md](way-to-claw-code.md)，把 `P1` 的第一版落地能力和后续缺口写回仓库。
+- 更新 [setup.cfg](setup.cfg)，把新的 `context_engine` 模块纳入安装元数据。
+- 新增 [tests/test_context_engine.py](tests/test_context_engine.py)，并补充 [tests/test_agent.py](tests/test_agent.py)，覆盖 compact 后 goal 保留、路线图注入和 context 统计。
+
+### 为什么这样改
+
+- 这是 `P1` 的真正起点：先让 `jarvis` 具备“会话不会只会越堆越长”的最小能力。
+- 这版 compact 还不聪明，但已经把最关键的架子搭起来了：短期 messages、中期 session memory、长期仓库规则与路线图开始分层。
+- 也顺手把这层逻辑从 `agent.py` 里拆开，为后面继续做更高质量摘要、持久 memory 和更复杂调度留出空间。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `./.venv/bin/jarvis --help`
+- `printf '/compact\n/quit\n' | python3 agent.py --repl`
+
 ### 补齐 14b 基线，并把本机默认模型建议收紧回 7b
 
 - 跑完 `qwen2.5-coder:14b` 的官方 benchmark 和 runtime diagnostics，并把结果落进 [benchmark-results/](benchmark-results/) 和 [diagnostic-results/](diagnostic-results/)。

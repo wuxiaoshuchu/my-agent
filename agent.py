@@ -20,6 +20,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from context_engine import (
+    SessionMemory,
+    build_context_stats,
+    compact_messages,
+    conversation_messages,
+    render_session_memory,
+    should_auto_compact,
+)
 from runtime_config import (
     CONFIG_FILENAME,
     RuntimeConfigSources,
@@ -42,7 +50,9 @@ DEFAULT_NUM_CTX = 16384
 DEFAULT_MAX_TURNS = 20
 DEFAULT_COMMAND_TIMEOUT = 30
 PROJECT_GUIDE_FILES = ("HARNESS.md", "CLAUDE.md")
+ROADMAP_GUIDE_FILES = ("way-to-claw-code.md",)
 MAX_PROJECT_GUIDE_CHARS = 4000
+MAX_ROADMAP_GUIDE_CHARS = 2600
 
 
 SYSTEM_PROMPT_TEMPLATE = """你是一个本地编码助手，用户在 Mac 终端里和你对话。
@@ -56,6 +66,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是一个本地编码助手，用户在 Mac 终�
 {tool_summary}
 
 {project_guide}
+{roadmap_guide}
 
 ## 行为规则
 - 优先使用专用工具而不是 shell：
@@ -68,6 +79,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是一个本地编码助手，用户在 Mac 终�
 - 只有在专用工具做不到时，再使用 run_command
 - 你可以连续调用多个工具，但任务完成后必须输出纯文字总结
 - 不要伪造“我已经改好了”之类的描述；修改必须真的通过工具完成
+- 如果 system memory 提到了历史摘要，把它当成压缩后的事实索引；需要精确细节时再读文件或查看最近 turn
 
 ## 路径与命令
 - 所有相对路径都以工作区根目录为基准
@@ -203,24 +215,48 @@ def build_workspace_snapshot(workspace_root: Path) -> str:
     return "\n".join(preview) if preview else "(空目录)"
 
 
-def load_project_guide(workspace_root: Path) -> str:
-    for filename in PROJECT_GUIDE_FILES:
+def load_workspace_guide(
+    workspace_root: Path,
+    *,
+    filenames: tuple[str, ...],
+    heading: str,
+    max_chars: int,
+) -> str:
+    for filename in filenames:
         path = workspace_root / filename
         if not path.exists():
             continue
         try:
             text = path.read_text(encoding="utf-8").strip()
         except OSError as exc:
-            return f"## 项目约定（来自 {filename}）\n(读取失败: {exc})"
+            return f"## {heading}（来自 {filename}）\n(读取失败: {exc})"
 
-        if len(text) > MAX_PROJECT_GUIDE_CHARS:
+        if len(text) > max_chars:
             text = (
-                text[:MAX_PROJECT_GUIDE_CHARS]
-                + f"\n... [项目约定过长，已截断，共 {len(text)} 字符]"
+                text[:max_chars]
+                + f"\n... [{heading} 过长，已截断，共 {len(text)} 字符]"
             )
-        return f"## 项目约定（来自 {filename}）\n{text}"
+        return f"## {heading}（来自 {filename}）\n{text}"
 
     return ""
+
+
+def load_project_guide(workspace_root: Path) -> str:
+    return load_workspace_guide(
+        workspace_root,
+        filenames=PROJECT_GUIDE_FILES,
+        heading="项目约定",
+        max_chars=MAX_PROJECT_GUIDE_CHARS,
+    )
+
+
+def load_roadmap_guide(workspace_root: Path) -> str:
+    return load_workspace_guide(
+        workspace_root,
+        filenames=ROADMAP_GUIDE_FILES,
+        heading="长期路线图",
+        max_chars=MAX_ROADMAP_GUIDE_CHARS,
+    )
 
 
 def build_system_prompt(config: AgentConfig, runtime: ToolRuntime) -> str:
@@ -229,6 +265,7 @@ def build_system_prompt(config: AgentConfig, runtime: ToolRuntime) -> str:
         workspace_snapshot=build_workspace_snapshot(config.workspace_root),
         tool_summary=runtime.tool_summary(),
         project_guide=load_project_guide(config.workspace_root),
+        roadmap_guide=load_roadmap_guide(config.workspace_root),
     )
 
 
@@ -314,14 +351,30 @@ class AgentSession:
         self.reset()
 
     def reset(self) -> None:
+        self.memory = SessionMemory()
+        self.activity_log.clear()
+        self.rebuild_messages([])
+        self.log_activity("system", "会话已初始化")
+
+    def non_system_messages(self) -> list[dict[str, object]]:
+        return conversation_messages(self.messages)
+
+    def rebuild_messages(
+        self,
+        conversation: list[dict[str, object]] | None = None,
+    ) -> None:
+        if conversation is None:
+            conversation = self.non_system_messages()
         self.messages = [
             {
                 "role": "system",
                 "content": build_system_prompt(self.config, self.runtime),
             }
         ]
-        self.activity_log.clear()
-        self.log_activity("system", "会话已初始化")
+        memory_prompt = render_session_memory(self.memory)
+        if memory_prompt:
+            self.messages.append({"role": "system", "content": memory_prompt})
+        self.messages.extend(conversation)
 
     def log_activity(self, kind: str, summary: str) -> None:
         entry = ActivityEntry(
@@ -340,6 +393,50 @@ class AgentSession:
             return False
         answer = input(f"{prompt} 输入 y 继续，其余任意键取消: ").strip().lower()
         return answer in {"y", "yes"}
+
+    def context_report(self) -> str:
+        stats = build_context_stats(self.messages)
+        lines = [
+            f"总消息数: {stats.total_messages}",
+            f"非 system 消息数: {stats.non_system_messages}",
+            f"turn 数: {stats.turn_count}",
+            f"估算 tokens: {stats.estimated_tokens} / num_ctx {self.config.num_ctx}",
+            f"active goal: {self.memory.active_goal or '(空)'}",
+            f"compact 次数: {len(self.memory.compaction_blocks)}",
+        ]
+        return "\n".join(lines)
+
+    def compact_history(self, *, reason: str) -> str:
+        result = compact_messages(
+            self.messages,
+            memory=self.memory,
+            reason=reason,
+        )
+        if not result.compacted:
+            return "当前会话还不需要 compact。\n\n" + self.context_report()
+
+        self.memory = result.memory
+        self.rebuild_messages(result.kept_messages)
+        after_stats = build_context_stats(self.messages)
+        summary = (
+            f"已 compact 历史上下文（{reason}）\n"
+            f"- dropped turns: {result.dropped_turns}\n"
+            f"- dropped messages: {result.dropped_messages}\n"
+            f"- tokens: {result.before_stats.estimated_tokens} -> {after_stats.estimated_tokens}\n"
+            f"- kept recent turns: {after_stats.turn_count}\n"
+            f"- active goal: {self.memory.active_goal or '(空)'}"
+        )
+        self.log_activity(
+            "compact",
+            f"{reason}: turns={result.dropped_turns} messages={result.dropped_messages}",
+        )
+        return summary
+
+    def maybe_auto_compact(self) -> None:
+        if not should_auto_compact(self.messages, num_ctx=self.config.num_ctx):
+            return
+        report = self.compact_history(reason="auto")
+        print(f"[compact] {report}")
 
     def summary_report(self, limit: int = 8) -> str:
         lines = ["本轮摘要"]
@@ -372,6 +469,10 @@ class AgentSession:
             lines.append("")
             lines.append("当前工作区不是 Git 仓库。")
 
+        lines.append("")
+        lines.append("Context：")
+        lines.append(self.context_report())
+
         return "\n".join(lines)
 
     def render_repl_header(self) -> str:
@@ -383,7 +484,7 @@ class AgentSession:
             style_text(f"workspace: {self.config.workspace_root}", color="bold", use_color=use_color),
             f"model: {self.config.model} | approval: {'auto' if self.runtime.auto_approve else 'ask'}",
             format_git_summary(snapshot),
-            "commands: /help /model /patch /summary /status /diff /commit /quit",
+            "commands: /help /model /compact /patch /summary /status /diff /commit /quit",
         ]
         return "\n".join(lines)
 
@@ -504,12 +605,18 @@ class AgentSession:
         return f"已更新默认 num_ctx 到 {num_ctx}\n配置文件: {config_path}"
 
     def add_user_message(self, text: str) -> None:
+        self.memory = SessionMemory(
+            active_goal=text,
+            compaction_blocks=self.memory.compaction_blocks,
+        )
+        self.rebuild_messages()
         self.messages.append({"role": "user", "content": text})
         self.log_activity("user", text[:200])
 
     def run_until_idle(self) -> bool:
         for turn in range(1, self.config.max_turns + 1):
             print(f"\n--- turn {turn} ---")
+            self.maybe_auto_compact()
 
             response = self.client.chat.completions.create(
                 model=self.config.model,
@@ -622,6 +729,7 @@ class AgentSession:
                         "  /tools  查看工具说明",
                         "  /pwd    显示工作区根目录",
                         "  /model  查看或切换模型配置",
+                        "  /compact 压缩较早会话历史",
                         "  /status 查看当前 Git 状态",
                         "  /branch 查看当前分支",
                         "  /diff [--stat|path] 查看改动",
@@ -678,6 +786,10 @@ class AgentSession:
                 return True
 
             print("用法: /model [use <name> | set <name> | ctx <N>]")
+            return True
+
+        if command == "/compact":
+            print(self.compact_history(reason="manual"))
             return True
 
         if command == "/status":

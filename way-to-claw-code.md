@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-截至 2026-04-23，这个仓库已经具备：
+截至 2026-04-24，这个仓库已经具备：
 
 - `jarvis` CLI 与 REPL
 - 多轮 session 与消息历史
@@ -17,10 +17,11 @@
 - Git 可观察性：`/status` `/branch` `/diff` `/patch` `/summary` `/commit`
 - patch 审批、逐段审批、终端审批面板、单键操作
 - `WorkspaceInspector` 独立模块与 Git 状态轻量缓存
+- 最小 `context engine`：message/token 估算、`session memory`、自动 compact 和 `/compact`
 
 但和 `claw-code` / `Codex` 这类成熟 agent 仍有明显差距，主要缺口不是单个功能，而是系统层：
 
-- 上下文管理：还没有 compact / summary memory / token budget
+- 上下文管理：已经有最小 compact / session memory，但还没有更高质量摘要、持久 memory 和精确 token budget
 - 工具调度：还没有只读工具并发、写操作串行、调度策略
 - 恢复能力：还没有 retry / fallback / 中断恢复 / 长任务继续
 - 权限系统：还没有 prefix rules / 持久规则 / 更细粒度审批
@@ -112,14 +113,21 @@
 
 ### 待办
 
-- [ ] 为 `AgentSession` 增加 token / message 数量估算
-- [ ] 做最小 `compact` 能力：当消息过长时，自动压缩历史为摘要块
-- [ ] 引入 `session memory` 概念，区分：
+- [x] 为 `AgentSession` 增加 token / message 数量估算
+- [x] 做最小 `compact` 能力：当消息过长时，自动压缩历史为摘要块
+- [x] 引入 `session memory` 概念，区分：
   - 短期：当前会话 messages
   - 中期：本轮任务摘要
   - 长期：仓库级规则与路线图
-- [ ] 给 REPL 增加 `/compact` 命令，允许手动压缩
-- [ ] 给系统提示组装逻辑增加“压缩后仍保留 HARNESS / 路线图 / 当前任务目标”
+- [x] 给 REPL 增加 `/compact` 命令，允许手动压缩
+- [x] 给系统提示组装逻辑增加“压缩后仍保留 HARNESS / 路线图 / 当前任务目标”
+
+### 当前实现说明
+
+- 现在的 compact 是 deterministic 的，不依赖额外模型调用
+- 会保留最近几个 turn，把更早对话折叠成 `session memory`
+- `session memory` 会和 `HARNESS.md`、`way-to-claw-code.md` 一起重新注入 system prompt
+- 这一版已经够用来避免“消息只会越堆越多”，但摘要质量和跨任务长期记忆还远没到终点
 
 ### 完成标准
 
@@ -245,7 +253,7 @@
 
 - [ ] 根据这轮诊断结果，决定是先调 `timeout / warmup / prompt`，还是直接换默认模型
 - [ ] 用 benchmark 脚手架继续补数据，比较 `qwen2.5-coder:7b` 与 `deepseek-coder-v2:16b`
-- [ ] 给 `jarvis` 增加最小 `compact` 机制设计草案
+- [ ] 用真实长任务回归这版 `compact / session memory`，修 compact 后 fake tool call 和摘要质量
 
 ## 不要误判的事情
 

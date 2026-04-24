@@ -13,6 +13,7 @@
 - 文件读写限制在工作区里，减少误操作
 - 增加了 `/status` `/branch` `/diff` `/history`，终于能看见自己做了什么
 - 增加了 `/summary` 和 `/commit`，可以回看本轮成果并直接提交
+- 增加了最小 `context engine`：会估算消息/tokens，并支持 `session memory + /compact`
 - 仓库现在有 [HARNESS.md](HARNESS.md) 和 [CHANGELOG.md](CHANGELOG.md)，方便 agent 继承规则和回看成长史
 - 仓库现在还有 [way-to-claw-code.md](way-to-claw-code.md)，用于记录长期路线图和后续待办
 - 仓库现在还有 [jarvis.config.json](jarvis.config.json) 和 [model-baseline.md](model-baseline.md)，用于固定默认模型和记录本机模型基线
@@ -125,6 +126,7 @@ python agent.py
 /tools  查看工具说明
 /pwd    显示当前工作区根目录
 /model  查看或切换模型配置
+/compact 压缩较早会话历史
 /status 查看当前 Git 状态
 /branch 查看当前分支
 /diff   查看当前 diff
@@ -152,6 +154,13 @@ python agent.py
 - `/model use`：只切换当前会话
 - `/model set`：切换并写入 `jarvis.config.json`
 - `/model ctx`：更新默认上下文窗口并写入 `jarvis.config.json`
+
+`/compact` 会做一版最小上下文压缩：
+
+- 保留最近几个 turn 不动
+- 把更早的对话折叠成 `session memory`
+- 保留当前 active goal
+- 重新把 `HARNESS.md`、`way-to-claw-code.md` 和 compact 后的记忆一起注入 system prompt
 
 ## VS Code 里启动
 
@@ -241,8 +250,9 @@ while loop:
 - 不依赖 `stop_reason == "tool_use"` 作为唯一判断
 - 给模型更多“少噪音、先用专用工具”的约束
 - 把 agent 做成一个会持续持有 `messages` 的 session，而不是一次性函数
+- 增加了最小 `context engine`，让长任务不再只能无限堆消息
 
-还没做的包括：流式输出、真正的权限系统、并发工具调度、compact、memory、sub-agent。
+还没做的包括：流式输出、更高质量的 compact 摘要、真正的权限系统、并发工具调度、sub-agent。
 
 ## 像 Claude 那样启动
 

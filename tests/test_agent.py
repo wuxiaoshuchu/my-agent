@@ -16,6 +16,7 @@ from agent import (
     extract_fake_tool_calls,
     parse_args,
 )
+from context_engine import SessionMemory
 from runtime_config import RuntimeConfigSources
 from tools import ToolRuntime
 
@@ -40,6 +41,7 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)
             (workspace / "HARNESS.md").write_text("Always update CHANGELOG.md", encoding="utf-8")
+            (workspace / "way-to-claw-code.md").write_text("P1: compact and session memory", encoding="utf-8")
             config = AgentConfig(
                 model="demo",
                 base_url="http://localhost:11434/v1",
@@ -62,6 +64,8 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
 
             self.assertIn("项目约定（来自 HARNESS.md）", prompt)
             self.assertIn("Always update CHANGELOG.md", prompt)
+            self.assertIn("长期路线图（来自 way-to-claw-code.md）", prompt)
+            self.assertIn("compact and session memory", prompt)
 
     def test_summary_report_includes_recent_activity_and_commit_hint(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -94,12 +98,19 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
             session.activity_log = [
                 ActivityEntry(timestamp="10:00:00", kind="user", summary="please update tracked.txt")
             ]
+            session.config = type("Config", (), {"num_ctx": 4096})()
+            session.memory = SessionMemory(active_goal="please update tracked.txt")
+            session.messages = [
+                {"role": "system", "content": "rules"},
+                {"role": "user", "content": "please update tracked.txt"},
+            ]
 
             summary = AgentSession.summary_report(session, limit=5)
 
             self.assertIn("本轮摘要", summary)
             self.assertIn("please update tracked.txt", summary)
             self.assertIn("建议 commit message", summary)
+            self.assertIn("Context：", summary)
 
     def test_build_config_prefers_workspace_runtime_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
