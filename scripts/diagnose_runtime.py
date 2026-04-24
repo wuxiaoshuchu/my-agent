@@ -283,12 +283,15 @@ def main(argv: list[str] | None = None) -> int:
     runtime_prompt = (
         "读取 jarvis.config.json，告诉我默认 model、base_url 和 num_ctx。请尽量简短，并保留原值。"
     )
+    profile_runtime = ToolRuntime(config.workspace_root, auto_approve=True, command_timeout=30)
+    profile_runtime.update_tool_profile_for_task(runtime_prompt, active_goal=runtime_prompt)
+    profile_system_prompt = build_system_prompt(config, profile_runtime)
     agent_payload_profile = build_request_payload_profile(
         [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": profile_system_prompt},
             {"role": "user", "content": runtime_prompt},
         ],
-        runtime.tool_schemas,
+        profile_runtime.tool_schemas,
         turn=1,
     )
 

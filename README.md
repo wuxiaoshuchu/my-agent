@@ -15,6 +15,7 @@
 - 增加了 `/summary` 和 `/commit`，可以回看本轮成果并直接提交
 - 增加了最小 `context engine`：会估算消息/tokens，并支持 `session memory + /compact`
 - 增加了 `/perf` 和模型请求追踪，可以看到当前请求载荷、tools schema 体积和最近几轮模型请求耗时
+- 现在会按任务意图自适应缩小工具集：读取/搜索类任务优先只暴露只读工具
 - 仓库现在有 [HARNESS.md](HARNESS.md) 和 [CHANGELOG.md](CHANGELOG.md)，方便 agent 继承规则和回看成长史
 - 仓库现在还有 [way-to-claw-code.md](way-to-claw-code.md)，用于记录长期路线图和后续待办
 - 仓库现在还有 [jarvis.config.json](jarvis.config.json) 和 [model-baseline.md](model-baseline.md)，用于固定默认模型和记录本机模型基线
@@ -176,6 +177,23 @@ python agent.py
 - 回看最近几轮模型请求的耗时、tool call 数和内容长度
 
 这对定位“到底慢在模型本身，还是 prompt / tools 载荷过大”很有帮助。
+
+现在 `jarvis` 还会对任务做一个很轻量的工具画像判断：
+
+- 读取、列出、搜索、总结这类只读任务：优先暴露 `read_file / list_files / grep_text`
+- 修改、编辑、创建、修复、运行这类任务：保留完整工具集
+
+这样做的目的不是“让 agent 更聪明”，而是先把本地模型首轮规划时必须处理的工具负担降下来。
+
+这轮真实结果也值得单独记一下：
+
+- 请求画像确实缩小了：
+  - `tool_schema_count: 7 -> 3`
+  - `tool_schema_chars: 2516 -> 920`
+  - `system_chars: 5147 -> 4939`
+- 但单次真实长诊断里，整体耗时没有立刻变快
+
+所以这一步更像“把方向探清楚”，不是“已经拿到稳定加速”。现在可以更明确地说，光减少工具数还不够，后面还得继续压 system prompt 和首轮规划路径。
 
 ## VS Code 里启动
 
@@ -455,6 +473,7 @@ python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b
 - [diagnostic-results/2026-04-24_001108_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_001108_qwen2-5-coder-7b.md)
 - [diagnostic-results/2026-04-24_010457_qwen2-5-coder-14b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_010457_qwen2-5-coder-14b.md)
 - [diagnostic-results/2026-04-24_104656_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_104656_qwen2-5-coder-7b.md)
+- [diagnostic-results/2026-04-24_110010_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_110010_qwen2-5-coder-7b.md)
 
 这轮新增的 payload 画像也给了我们一个更具体的基线：
 
@@ -465,3 +484,13 @@ python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b
   - turn 2 读完文件后的最终回答大约 `23.5s`
 
 所以现在可以更确定地说：这台机器上的瓶颈确实集中在 `jarvis` 风格 prompt + tools 的首轮规划，不是单纯 `Ollama` 服务挂了。
+
+最新这轮 `read_only tool profile` 诊断又补了一层信息：
+
+- `agent_payload_profile` 已经缩到：
+  - `est_tokens=1321`
+  - `system_chars=4939`
+  - `tool_schema_chars=920`
+- 但同一轮长超时任务在这个样本里反而到了大约 `131s`
+
+这说明本地模型的时延波动确实很大。也正因为这样，我们更需要把每次架构调整都沉淀成报告，而不是只凭一轮体感下结论。

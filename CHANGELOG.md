@@ -4,6 +4,35 @@
 
 ## 2026-04-24
 
+### 按任务缩小工具集，先减轻本地模型首轮规划负担
+
+- 更新 [tools.py](tools.py)，新增轻量 `tool profile` 推断：
+  - 读取/搜索类任务优先切到 `read_only`
+  - 修改/实现类任务继续保留 `full`
+- `read_only` 画像当前只暴露 `read_file`、`list_files`、`grep_text`。
+- 更新 [agent.py](agent.py)，在每次用户发起任务时先根据任务目标切换工具画像，再重建 system prompt。
+- 补充 [tests/test_agent.py](tests/test_agent.py)，覆盖只读任务会切到 `read_only`、编辑任务保持 `full`。
+- 更新 [README.md](README.md)、[way-to-claw-code.md](way-to-claw-code.md)，把这一轮的性能优化思路写回仓库。
+- 新增一份新的诊断结果到 [diagnostic-results/2026-04-24_110010_qwen2-5-coder-7b.md](diagnostic-results/2026-04-24_110010_qwen2-5-coder-7b.md)。
+- 这轮新的 payload 画像已经明显缩小：
+  - `tool_schema_count: 7 -> 3`
+  - `tool_schema_chars: 2516 -> 920`
+  - `system_chars: 5147 -> 4939`
+- 但单次真实长诊断没有立刻变快，说明本地模型时延波动和首轮规划成本仍然是主要瓶颈。
+
+### 为什么这样改
+
+- 上一轮我们已经知道：真正慢的不是 `Ollama` 服务，而是 `jarvis` 风格的首轮请求。
+- 既然问题集中在首轮规划，那最值得先动的不是“大改架构”，而是先减少模型每轮要看的无关工具。
+- 这是一个很典型的 agent 工程思路：先缩窄决策空间，再继续做更深的 scheduler/parallelism。
+- 这轮结果也提醒我们保持诚实：请求载荷变小不等于单次 wall-clock 一定立刻下降，尤其在本地模型波动比较大的前提下。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `printf '/perf\n/quit\n' | python3 agent.py --repl`
+- `python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b --output-dir diagnostic-results`
+
 ### 给 jarvis 增加请求级性能观察，并把 payload profile 接进 diagnostics
 
 - 新增 [performance_trace.py](performance_trace.py)，把模型请求载荷画像和请求耗时轨迹抽成独立模块。

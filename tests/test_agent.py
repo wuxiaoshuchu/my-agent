@@ -20,7 +20,7 @@ from agent import (
 from context_engine import SessionMemory
 from performance_trace import ModelRequestTrace, RequestPayloadProfile
 from runtime_config import RuntimeConfigSources
-from tools import ToolRuntime
+from tools import ToolRuntime, infer_tool_profile
 
 
 class ExtractFakeToolCallsTests(unittest.TestCase):
@@ -158,6 +158,14 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
             self.assertEqual(config.model, "deepseek-coder-v2:16b")
             self.assertEqual(config.runtime_sources.model, "cli")
 
+    def test_infer_tool_profile_uses_read_only_for_lookup_tasks(self):
+        profile = infer_tool_profile("读取 jarvis.config.json，告诉我默认 model")
+        self.assertEqual(profile, "read_only")
+
+    def test_infer_tool_profile_keeps_full_for_edit_tasks(self):
+        profile = infer_tool_profile("修改 agent.py，给 /perf 加更多输出")
+        self.assertEqual(profile, "full")
+
     def test_run_until_idle_omits_tools_when_no_tool_schemas(self):
         class FakeMessage:
             content = "done"
@@ -216,7 +224,11 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
             {"role": "system", "content": "rules"},
             {"role": "user", "content": "hello"},
         ]
-        session.runtime = type("Runtime", (), {"tool_schemas": []})()
+        session.runtime = type(
+            "Runtime",
+            (),
+            {"tool_schemas": [], "active_tool_profile": "read_only"},
+        )()
         session.request_traces = [
             ModelRequestTrace(
                 turn=1,
@@ -241,9 +253,28 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
         report = AgentSession.performance_report(session, limit=3)
 
         self.assertIn("性能观察", report)
+        self.assertIn("当前工具画像：read_only", report)
         self.assertIn("当前请求载荷", report)
         self.assertIn("最近模型请求", report)
         self.assertIn("3210ms", report)
+
+    def test_add_user_message_switches_to_read_only_tool_profile(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            session = object.__new__(AgentSession)
+            session.runtime = ToolRuntime(Path(tmpdir), auto_approve=True, command_timeout=5)
+            session.memory = SessionMemory(active_goal="")
+            session.messages = []
+            session.activity_log = []
+            session.log_activity = lambda *args, **kwargs: None
+            session.rebuild_messages = lambda conversation=None: None
+
+            AgentSession.add_user_message(session, "读取 jarvis.config.json，告诉我默认 model")
+
+            self.assertEqual(session.runtime.active_tool_profile, "read_only")
+            self.assertEqual(
+                set(session.runtime.active_tool_names),
+                {"read_file", "list_files", "grep_text"},
+            )
 
 
 if __name__ == "__main__":

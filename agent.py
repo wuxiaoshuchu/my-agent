@@ -391,6 +391,8 @@ class AgentSession:
         self.memory = SessionMemory()
         self.activity_log.clear()
         self.request_traces: list[ModelRequestTrace] = []
+        self.runtime.set_tool_profile("full")
+        self.tool_names = self.runtime.tool_names()
         self.rebuild_messages([])
         self.log_activity("system", "会话已初始化")
 
@@ -532,6 +534,7 @@ class AgentSession:
         lines = [
             "性能观察",
             "",
+            f"当前工具画像：{self.runtime.active_tool_profile}",
             "当前请求载荷：",
             render_payload_profile(current_payload),
             "",
@@ -677,8 +680,15 @@ class AgentSession:
         return f"已更新默认 num_ctx 到 {num_ctx}\n配置文件: {config_path}"
 
     def add_user_message(self, text: str) -> None:
+        next_goal = resolve_active_goal(self.memory.active_goal, text)
+        if self.runtime.update_tool_profile_for_task(text, active_goal=next_goal):
+            self.tool_names = self.runtime.tool_names()
+            self.log_activity(
+                "tool_profile",
+                f"{self.runtime.active_tool_profile}: {', '.join(self.runtime.active_tool_names) or '(none)'}",
+            )
         self.memory = SessionMemory(
-            active_goal=resolve_active_goal(self.memory.active_goal, text),
+            active_goal=next_goal,
             compaction_blocks=self.memory.compaction_blocks,
         )
         self.rebuild_messages()

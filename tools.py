@@ -19,6 +19,64 @@ PATCH_REVIEW_PANEL_WIDTH = 78
 DEFAULT_LIST_LIMIT = 200
 DEFAULT_GREP_LIMIT = 50
 MAX_TEXT_FILE_SIZE = 512 * 1024
+READ_ONLY_TOOL_NAMES = ("read_file", "list_files", "grep_text")
+TOOL_SUMMARY_LINES = {
+    "read_file": "- read_file(path): 读取工作区内文本文件",
+    "write_file": "- write_file(path, content): 整文件写入，适合新建或重写文件",
+    "edit_file": "- edit_file(path, old_text, new_text, replace_all=False): 精确替换文件中的一段文本",
+    "apply_patch": "- apply_patch(path, edits): 一次应用多个精确文本替换，适合多处局部改动",
+    "list_files": "- list_files(path='.', glob='**/*', limit=200): 列目录或文件",
+    "grep_text": "- grep_text(pattern, path='.', limit=50): 搜索文本",
+    "run_command": "- run_command(cmd): 在工作区根目录执行 shell，执行前会请求确认",
+}
+READ_ONLY_PROFILE_MARKERS = (
+    "读取",
+    "查看",
+    "列出",
+    "搜索",
+    "查找",
+    "总结",
+    "解释",
+    "分析",
+    "where",
+    "what",
+    "list ",
+    "read ",
+    "search",
+    "grep",
+    "find ",
+    "summarize",
+    "explain",
+    "show ",
+)
+WRITE_PROFILE_MARKERS = (
+    "修改",
+    "编辑",
+    "写入",
+    "重写",
+    "创建",
+    "新增",
+    "删除",
+    "修复",
+    "实现",
+    "重构",
+    "改成",
+    "提交",
+    "运行",
+    "replace",
+    "edit ",
+    "write ",
+    "create ",
+    "delete ",
+    "fix ",
+    "implement",
+    "refactor",
+    "update ",
+    "change ",
+    "commit",
+    "run ",
+    "patch",
+)
 
 
 def _truncate(text: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:
@@ -34,6 +92,17 @@ def _truncate(text: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:
         + f"\n\n... [已省略 {omitted} 字符。请缩小范围后再读] ...\n\n"
         + tail
     )
+
+
+def infer_tool_profile(task_text: str) -> str:
+    normalized = re.sub(r"\s+", " ", task_text.strip().lower())
+    if not normalized:
+        return "full"
+    if any(marker in normalized for marker in WRITE_PROFILE_MARKERS):
+        return "full"
+    if any(marker in normalized for marker in READ_ONLY_PROFILE_MARKERS):
+        return "read_only"
+    return "full"
 
 
 def _read_text_file(path: Path, limit: int = MAX_FILE_PREVIEW_CHARS) -> str:
@@ -210,7 +279,7 @@ class ToolRuntime:
 
     def __post_init__(self) -> None:
         self.workspace_root = self.workspace_root.expanduser().resolve()
-        self.tool_schemas = [
+        schemas = [
             {
                 "type": "function",
                 "function": {
@@ -372,21 +441,53 @@ class ToolRuntime:
                 },
             },
         ]
+        self._tool_schema_map = {
+            schema["function"]["name"]: schema for schema in schemas
+        }
+        self.active_tool_profile = "full"
+        self.active_tool_names = tuple(self._tool_schema_map.keys())
+        self.tool_schemas = list(self._tool_schema_map.values())
+
+    def set_tool_profile(self, profile: str) -> None:
+        if profile == "read_only":
+            tool_names = READ_ONLY_TOOL_NAMES
+        elif profile == "none":
+            tool_names = ()
+        else:
+            profile = "full"
+            tool_names = tuple(self._tool_schema_map.keys())
+
+        self.active_tool_profile = profile
+        self.active_tool_names = tuple(
+            name for name in tool_names if name in self._tool_schema_map
+        )
+        self.tool_schemas = [
+            self._tool_schema_map[name] for name in self.active_tool_names
+        ]
+
+    def update_tool_profile_for_task(
+        self,
+        task_text: str,
+        *,
+        active_goal: str = "",
+    ) -> bool:
+        combined = "\n".join(
+            part.strip() for part in (task_text, active_goal) if part and part.strip()
+        )
+        next_profile = infer_tool_profile(combined)
+        if next_profile == self.active_tool_profile:
+            return False
+        self.set_tool_profile(next_profile)
+        return True
 
     def tool_names(self) -> set[str]:
-        return {schema["function"]["name"] for schema in self.tool_schemas}
+        return set(self.active_tool_names)
 
     def tool_summary(self) -> str:
         return "\n".join(
-            [
-                "- read_file(path): 读取工作区内文本文件",
-                "- write_file(path, content): 整文件写入，适合新建或重写文件",
-                "- edit_file(path, old_text, new_text, replace_all=False): 精确替换文件中的一段文本",
-                "- apply_patch(path, edits): 一次应用多个精确文本替换，适合多处局部改动",
-                "- list_files(path='.', glob='**/*', limit=200): 列目录或文件",
-                "- grep_text(pattern, path='.', limit=50): 搜索文本",
-                "- run_command(cmd): 在工作区根目录执行 shell，执行前会请求确认",
-            ]
+            TOOL_SUMMARY_LINES[name]
+            for name in self.active_tool_names
+            if name in TOOL_SUMMARY_LINES
         )
 
     def _resolve_path(self, path: str, *, allow_missing: bool = False) -> Path:
