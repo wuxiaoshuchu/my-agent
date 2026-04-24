@@ -4,6 +4,35 @@
 
 ## 2026-04-24
 
+### 给 P1 增加 live context regression，并把 goal-only 与 full-stack case 分层
+
+- 新增 [context_live_regression.py](context_live_regression.py)，把 live model 的 `compact / active goal / tool use` 回归运行、评估与报告逻辑抽成独立模块。
+- 新增 [benchmarks/context_live_tasks.json](benchmarks/context_live_tasks.json)，把当前 live `P1` 样本拆成两层：
+  - `goal-only`：显式关闭工具 schema，只验证 compact 后还能不能沿用当前任务目标
+  - `full-stack`：继续保留真实 `read_file` 任务，观察 compact 后还能不能继续工具链
+- 新增 [scripts/regress_context_live.py](scripts/regress_context_live.py)，可以直接对指定本地模型跑 live context 回归。
+- 更新 [agent.py](agent.py)，让从普通文本里解析到 fake tool call 时也会记录 `tool_parse` 活动日志，并明确告诉模型“继续 / continue”这类低信息 follow-up 应优先沿用 Session Memory 里的当前目标。
+- 更新 [agent.py](agent.py)，让没有工具 schema 的会话不再把空 `tools/tool_choice` 也发给模型，方便 goal-only live case 更干净地隔离上下文层。
+- 更新 [README.md](README.md)、[way-to-claw-code.md](way-to-claw-code.md)、[setup.cfg](setup.cfg)，把 live harness 和新的 `P1` 分层验证思路写回仓库。
+- 加入首批 live 结果到 [context-live-results/](context-live-results/)：
+  - `compacted_goal_resume_direct` 在 `qwen2.5-coder:7b` 上 `101s` 左右通过
+  - `compacted_goal_resume_continue` 在 `qwen2.5-coder:7b` 上 `100s` 左右通过
+  - 两条 `full-stack` case 在 `120s` 左右超时
+
+### 为什么这样改
+
+- deterministic harness 已经能回归 `compact / active goal / fake tool call`，但它还不能告诉我们真实模型在长任务里到底会不会沿着 compact 后的任务主线继续干活。
+- 这一轮把 live harness 真正补进来之后，我们发现一件很关键的事：如果只保留“compact 后继续调工具”的重样本，`P1` 的 live 验证会被本机模型吞吐完全拖住。
+- 所以这轮把 live case 拆成了 `goal-only` 和 `full-stack` 两层，让 `P1` 可以先把“上下文链路对不对”验证清楚，再继续逼近“上下文 + 工具链一起稳不稳”。
+- 真实结果也很说明问题：`goal-only` 已经能证明 compact 后的 active goal 延续是可用的，但这台机器上的 `7b` 仍然要接近 `100s`；而 `full-stack` 还会在 `120s` 内超时，这说明下一步除了继续做 `P1`，也得开始认真做 `P0/P2` 的性能与调度优化。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `./.venv/bin/jarvis --help`
+- `python3 scripts/regress_context_live.py --model qwen2.5-coder:7b --task-id compacted_goal_resume_direct --task-id compacted_goal_resume_continue`
+- `python3 scripts/regress_context_live.py --model qwen2.5-coder:7b --task-id compacted_runtime_defaults_direct --task-id compacted_runtime_defaults_continue`
+
 ### 给 P1 增加专门的 context regression harness
 
 - 新增 [context_regression_harness.py](context_regression_harness.py)，把 `compact / active goal / fake tool call` 的回归运行与报告逻辑抽成独立模块。

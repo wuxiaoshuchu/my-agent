@@ -19,6 +19,7 @@
 - 仓库现在还有 [jarvis.config.json](jarvis.config.json) 和 [model-baseline.md](model-baseline.md)，用于固定默认模型和记录本机模型基线
 - 仓库现在还有 benchmark 任务集和结果目录，可以开始比较不同本地模型的实际表现
 - 仓库现在还有 context regression harness，可以稳定回归 `compact / session memory` 行为
+- 仓库现在还有 live context regression harness，可以在真实模型上回归 `compact / active goal / full-stack tool use`
 - 自带 `.vscode` 配置，可以在 VS Code 里一键启动 `jarvis`
 - REPL 现在有启动 banner、Git 状态头和动态提示符，更接近真正的 CLI 工具
 - 增加了 `edit_file` 工具和 `/patch` 命令，可以做局部编辑并直接预览改动
@@ -373,6 +374,49 @@ python3 scripts/regress_context_engine.py
 当前首份正式结果已经在：
 
 - [context-regression-results/2026-04-24_093644.md](/Users/wuxiaoshuchu/Desktop/my-agent/context-regression-results/2026-04-24_093644.md)
+
+## Live Context 回归
+
+为了把 `P1` 从 deterministic harness 推进到真实模型，这个仓库现在还带了：
+
+- [benchmarks/context_live_tasks.json](benchmarks/context_live_tasks.json)：live model 的 `P1` 回归样本
+- [context_live_regression.py](context_live_regression.py)：live 回归运行与报告逻辑
+- [scripts/regress_context_live.py](scripts/regress_context_live.py)：一键运行 live context 回归
+- [context-live-results/](context-live-results/)：保存 live 回归的 json / markdown 结果
+
+跑一轮当前 live 回归集：
+
+```bash
+python3 scripts/regress_context_live.py --model qwen2.5-coder:7b
+```
+
+这套 live case 现在分成两层：
+
+- `goal-only`：显式关闭工具 schema，只验证 compact 后还能不能沿用当前任务目标
+- `full-stack`：继续保留真实工具链任务，验证 compact 后还能不能继续 `read_file`
+
+这样我们就能把“上下文层真的坏了”和“模型在这台机器上太慢”分开看。
+
+当前第一轮 live 结果已经说明了两件事：
+
+- `goal-only` case 是接下来最适合继续压实 `P1` 的主样本
+- `full-stack` case 在 `qwen2.5-coder:7b` 上目前仍然容易碰到 `120s` 超时，所以它更像 `P1 + P0` 的联合压力测试
+
+当前已经沉淀了 3 份代表性结果：
+
+- [context-live-results/2026-04-24_101142_qwen2.5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/context-live-results/2026-04-24_101142_qwen2.5-coder-7b.md)
+  - `compacted_goal_resume_direct`
+  - 触发了 `1` 次 compact
+  - 不走 tools
+  - 在 `101s` 左右成功输出 `CONTEXT_GOAL_OK`
+- [context-live-results/2026-04-24_101333_qwen2.5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/context-live-results/2026-04-24_101333_qwen2.5-coder-7b.md)
+  - `compacted_goal_resume_continue`
+  - 触发了 `1` 次 compact
+  - 用户只说“继续”时仍然沿用了 active goal
+  - 在 `100s` 左右成功输出 `CONTEXT_GOAL_OK`
+- [context-live-results/2026-04-24_100052_qwen2.5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/context-live-results/2026-04-24_100052_qwen2.5-coder-7b.md)
+  - 两条 `full-stack` 任务都在 `120s` 左右超时
+  - compact 能触发，但还没进入 `read_file`
 
 ## 运行时诊断
 

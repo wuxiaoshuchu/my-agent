@@ -19,6 +19,7 @@
 - `WorkspaceInspector` 独立模块与 Git 状态轻量缓存
 - 最小 `context engine`：message/token 估算、`session memory`、自动 compact 和 `/compact`
 - `P1` 现在还有 deterministic context regression harness，可以回归 compact / active goal / fake tool call
+- `P1` 现在还有 live context regression harness，可以在真实模型上回归 compact / active goal / full-stack tool use
 
 但和 `claw-code` / `Codex` 这类成熟 agent 仍有明显差距，主要缺口不是单个功能，而是系统层：
 
@@ -133,6 +134,13 @@
   - compact 摘要会尽量过滤 fake tool call JSON
   - “继续 / continue” 这类低信息 follow-up 不会覆盖 active goal
 - 现在还有一套固定 regression cases 和结果目录，后续改 `P1` 时可以持续回归
+- 现在还补上了 live model regression：
+  - `goal-only` case 先显式关闭工具 schema，再验证 compact 后还能不能沿用当前任务目标
+  - `full-stack` case 再继续验证 compact 后还能不能恢复真实工具链
+- 当前第一轮 live 结果已经说明：
+  - `goal-only` 是接下来最适合持续压实的 `P1` 主样本
+  - `goal-only` 在 `qwen2.5-coder:7b` 上已经能通过，但单条大约仍要 `100s`
+  - `full-stack` 在 `qwen2.5-coder:7b` 上仍然容易碰到 `120s` 超时，所以它同时也是 `P0 + P1` 的联合压力测试
 - 这一版已经够用来避免“消息只会越堆越多”，但摘要质量和跨任务长期记忆还远没到终点
 
 ### 完成标准
@@ -140,6 +148,7 @@
 - 长任务中上下文不会无限膨胀
 - 压缩后仍保留任务目标、已完成工作、未完成工作
 - 至少有测试覆盖 compact 前后关键信息保留
+- 至少有一套 live regression 可以稳定验证 compact 后的目标延续
 
 ## P2 Tool Scheduler
 

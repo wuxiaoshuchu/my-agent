@@ -157,6 +157,54 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
             self.assertEqual(config.model, "deepseek-coder-v2:16b")
             self.assertEqual(config.runtime_sources.model, "cli")
 
+    def test_run_until_idle_omits_tools_when_no_tool_schemas(self):
+        class FakeMessage:
+            content = "done"
+            tool_calls = None
+
+        class FakeChoice:
+            message = FakeMessage()
+
+        class FakeResponse:
+            choices = [FakeChoice()]
+
+        class FakeCompletions:
+            def __init__(self):
+                self.calls = []
+
+            def create(self, **kwargs):
+                self.calls.append(kwargs)
+                return FakeResponse()
+
+        class FakeChat:
+            def __init__(self):
+                self.completions = FakeCompletions()
+
+        class FakeClient:
+            def __init__(self):
+                self.chat = FakeChat()
+
+        session = object.__new__(AgentSession)
+        session.config = type(
+            "Config",
+            (),
+            {"max_turns": 1, "model": "demo", "num_ctx": 2048},
+        )()
+        session.client = FakeClient()
+        session.runtime = type("Runtime", (), {"tool_schemas": [], "execute_tool": lambda *args, **kwargs: ""})()
+        session.tool_names = set()
+        session.messages = [{"role": "user", "content": "hello"}]
+        session.activity_log = []
+        session.maybe_auto_compact = lambda: None
+        session.log_activity = lambda *args, **kwargs: None
+
+        finished = AgentSession.run_until_idle(session)
+
+        self.assertTrue(finished)
+        call = session.client.chat.completions.calls[0]
+        self.assertNotIn("tools", call)
+        self.assertNotIn("tool_choice", call)
+
 
 if __name__ == "__main__":
     unittest.main()
