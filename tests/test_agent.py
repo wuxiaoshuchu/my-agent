@@ -15,6 +15,7 @@ from agent import (
     build_config,
     extract_fake_tool_calls,
     parse_args,
+    resolve_active_goal,
 )
 from context_engine import SessionMemory
 from runtime_config import RuntimeConfigSources
@@ -32,10 +33,23 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
         calls = extract_fake_tool_calls(content, {"grep_text"})
         self.assertEqual(calls, [("grep_text", {"pattern": "TODO"})])
 
+    def test_extracts_tool_call_from_function_name_variant(self):
+        content = '```json\n{"function_name":"read_file","arguments":{"path":"jarvis.config.json"}}\n```'
+        calls = extract_fake_tool_calls(content, {"read_file"})
+        self.assertEqual(calls, [("read_file", {"path": "jarvis.config.json"})])
+
     def test_ignores_unknown_tools(self):
         content = '{"name":"unknown_tool","arguments":{"path":"README.md"}}'
         calls = extract_fake_tool_calls(content, {"read_file"})
         self.assertEqual(calls, [])
+
+    def test_resolve_active_goal_keeps_previous_goal_on_continue(self):
+        goal = resolve_active_goal("修复 compact 后的 fake tool call", "继续")
+        self.assertEqual(goal, "修复 compact 后的 fake tool call")
+
+    def test_resolve_active_goal_accepts_new_substantive_goal(self):
+        goal = resolve_active_goal("修复 compact 后的 fake tool call", "给 compact 增加更稳的摘要")
+        self.assertEqual(goal, "给 compact 增加更稳的摘要")
 
     def test_build_system_prompt_includes_harness_md(self):
         with tempfile.TemporaryDirectory() as tmpdir:

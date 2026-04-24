@@ -11,6 +11,7 @@ from context_engine import (
     SessionMemory,
     build_context_stats,
     compact_messages,
+    looks_like_tool_call_text,
     render_session_memory,
     should_auto_compact,
 )
@@ -81,6 +82,38 @@ class ContextEngineTests(unittest.TestCase):
             messages.append({"role": "assistant", "content": f"结果 {index}"})
 
         self.assertTrue(should_auto_compact(messages, num_ctx=4096))
+
+    def test_rendered_memory_skips_assistant_fake_tool_call_json(self):
+        messages = [
+            {"role": "system", "content": "rules"},
+            {"role": "user", "content": "读取 jarvis.config.json"},
+            {
+                "role": "assistant",
+                "content": '```json\n{"function_name":"read_file","arguments":{"path":"jarvis.config.json"}}\n```',
+            },
+            {"role": "user", "content": "继续总结默认配置"},
+            {"role": "assistant", "content": "我会继续整理默认配置。"},
+            {"role": "user", "content": "给我一句结论"},
+            {"role": "assistant", "content": "默认模型还是 qwen2.5-coder:7b。"},
+        ]
+
+        result = compact_messages(
+            messages,
+            memory=SessionMemory(active_goal="总结默认配置"),
+            reason="manual",
+            now=datetime(2026, 4, 24, 2, 10, 0),
+        )
+
+        memory_text = render_session_memory(result.memory)
+        self.assertNotIn("function_name", memory_text)
+        self.assertIn("读取 jarvis.config.json", memory_text)
+
+    def test_detects_function_name_json_as_tool_call_text(self):
+        self.assertTrue(
+            looks_like_tool_call_text(
+                '```json\n{"function_name":"read_file","arguments":{"path":"jarvis.config.json"}}\n```'
+            )
+        )
 
 
 if __name__ == "__main__":

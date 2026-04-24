@@ -127,6 +127,10 @@
 - 现在的 compact 是 deterministic 的，不依赖额外模型调用
 - 会保留最近几个 turn，把更早对话折叠成 `session memory`
 - `session memory` 会和 `HARNESS.md`、`way-to-claw-code.md` 一起重新注入 system prompt
+- 已经补了一轮真实回归里暴露的问题：
+  - `function_name` 形式的 fake tool call 现在也能被解析
+  - compact 摘要会尽量过滤 fake tool call JSON
+  - “继续 / continue” 这类低信息 follow-up 不会覆盖 active goal
 - 这一版已经够用来避免“消息只会越堆越多”，但摘要质量和跨任务长期记忆还远没到终点
 
 ### 完成标准
@@ -253,7 +257,7 @@
 
 - [ ] 根据这轮诊断结果，决定是先调 `timeout / warmup / prompt`，还是直接换默认模型
 - [ ] 用 benchmark 脚手架继续补数据，比较 `qwen2.5-coder:7b` 与 `deepseek-coder-v2:16b`
-- [ ] 用真实长任务回归这版 `compact / session memory`，修 compact 后 fake tool call 和摘要质量
+- [ ] 用真实 live model 长任务继续回归这版 `compact / session memory`，重点看摘要质量和自动 compact 触发阈值
 
 ## 不要误判的事情
 

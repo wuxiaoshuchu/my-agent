@@ -53,6 +53,17 @@ PROJECT_GUIDE_FILES = ("HARNESS.md", "CLAUDE.md")
 ROADMAP_GUIDE_FILES = ("way-to-claw-code.md",)
 MAX_PROJECT_GUIDE_CHARS = 4000
 MAX_ROADMAP_GUIDE_CHARS = 2600
+LOW_SIGNAL_GOAL_TEXTS = {
+    "继续",
+    "继续吧",
+    "继续做",
+    "接着来",
+    "接着做",
+    "go on",
+    "continue",
+    "keep going",
+    "next",
+}
 
 
 SYSTEM_PROMPT_TEMPLATE = """你是一个本地编码助手，用户在 Mac 终端里和你对话。
@@ -309,11 +320,29 @@ def extract_fake_tool_calls(content: str, tool_names: set[str]):
         for obj in _find_top_level_json_objects(fragment):
             if not isinstance(obj, dict):
                 continue
-            name = obj.get("name")
-            args = obj.get("arguments") or obj.get("parameters") or {}
+            name = obj.get("name") or obj.get("function_name")
+            args = (
+                obj.get("arguments")
+                or obj.get("parameters")
+                or obj.get("input")
+                or obj.get("args")
+                or {}
+            )
             if name in tool_names and isinstance(args, dict):
                 results.append((name, args))
     return results
+
+
+def resolve_active_goal(previous_goal: str, new_user_text: str) -> str:
+    text = new_user_text.strip()
+    normalized = re.sub(r"\s+", " ", text.lower())
+    if not text:
+        return previous_goal
+    if normalized in LOW_SIGNAL_GOAL_TEXTS and previous_goal:
+        return previous_goal
+    if len(text) <= 12 and previous_goal and normalized in {"ok", "好的", "收到"}:
+        return previous_goal
+    return text
 
 
 def pretty_tool_call(name: str, args: dict) -> str:
@@ -606,7 +635,7 @@ class AgentSession:
 
     def add_user_message(self, text: str) -> None:
         self.memory = SessionMemory(
-            active_goal=text,
+            active_goal=resolve_active_goal(self.memory.active_goal, text),
             compaction_blocks=self.memory.compaction_blocks,
         )
         self.rebuild_messages()

@@ -207,6 +207,7 @@ def summarize_messages(
             for message in messages
             if message.get("role") == "assistant"
             and str(message.get("content", "")).strip()
+            and not looks_like_tool_call_text(str(message.get("content", "")).strip())
         ],
         limit=max_items,
     )
@@ -272,3 +273,39 @@ def _unique_snippets(items: Sequence[str], *, limit: int) -> list[str]:
         if len(results) >= limit:
             break
     return results
+
+
+def looks_like_tool_call_text(text: str) -> bool:
+    normalized = text.strip()
+    if not normalized:
+        return False
+    if normalized.startswith("<tool_call>") and normalized.endswith("</tool_call>"):
+        return True
+    if normalized.startswith("```") and '"function_name"' not in normalized and '"name"' not in normalized:
+        return False
+
+    decoder = json.JSONDecoder()
+    candidates = [normalized]
+    if normalized.startswith("```"):
+        stripped = normalized.strip("`").strip()
+        if stripped.startswith("json"):
+            stripped = stripped[4:].strip()
+        candidates.append(stripped)
+
+    for candidate in candidates:
+        try:
+            obj, _ = decoder.raw_decode(candidate)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        name = obj.get("name") or obj.get("function_name")
+        args = (
+            obj.get("arguments")
+            or obj.get("parameters")
+            or obj.get("input")
+            or obj.get("args")
+        )
+        if isinstance(name, str) and name.strip() and isinstance(args, dict):
+            return True
+    return False

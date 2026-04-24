@@ -4,6 +4,24 @@
 
 ## 2026-04-24
 
+### 回归 P1 长任务问题，修 fake tool call 和 active goal 漂移
+
+- 更新 [agent.py](agent.py)，让 fake tool call 解析器支持 `function_name` 这种真实回归里出现过的变体。
+- 更新 [agent.py](agent.py)，让 `active goal` 在用户只输入“继续 / continue”这类低信息 follow-up 时继续沿用原任务主线。
+- 更新 [context_engine.py](context_engine.py)，让 compact 摘要尽量过滤 fake tool call JSON，减少历史摘要污染后续模型行为。
+- 补充 [tests/test_agent.py](tests/test_agent.py) 和 [tests/test_context_engine.py](tests/test_context_engine.py)，把这轮真实回归样本固化成测试。
+- 更新 [README.md](README.md) 和 [way-to-claw-code.md](way-to-claw-code.md)，把这轮回归修正写回仓库。
+
+### 为什么这样改
+
+- `P1` 第一版虽然已经能 compact，但真实长任务里还是暴露了两类很典型的问题：模型会吐另一种 fake tool call 形态，低信息 follow-up 会把任务主线冲淡。
+- 这轮修的不是“新功能”，而是让 `compact / session memory` 这条链更可靠，更接近真正长任务里能用的状态。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `python3 - <<'PY' ... extract_fake_tool_calls(function_name 变体) ... PY`
+
 ### 进入 P1，给 jarvis 增加最小 context engine
 
 - 新增 [context_engine.py](context_engine.py)，把会话长度估算、自动 compact、`session memory` 和 memory 渲染逻辑从 [agent.py](agent.py) 里拆出来。

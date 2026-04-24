@@ -161,6 +161,8 @@ python agent.py
 - 把更早的对话折叠成 `session memory`
 - 保留当前 active goal
 - 重新把 `HARNESS.md`、`way-to-claw-code.md` 和 compact 后的记忆一起注入 system prompt
+- 会尽量过滤掉 fake tool call JSON 这类容易污染后续模型行为的摘要内容
+- 如果用户只说“继续 / continue”这类低信息 follow-up，会沿用原任务主线，而不是把 active goal 覆盖成“继续”
 
 ## VS Code 里启动
 
