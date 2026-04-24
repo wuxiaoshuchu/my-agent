@@ -195,6 +195,20 @@ python agent.py
 
 所以这一步更像“把方向探清楚”，不是“已经拿到稳定加速”。现在可以更明确地说，光减少工具数还不够，后面还得继续压 system prompt 和首轮规划路径。
 
+下一轮补的 `lean_read_only prompt` 之后，这个结论又更细了一层：
+
+- 只读任务的 prompt 体积进一步从大约 `4939 chars` 压到了 `1620 chars`
+- `est_tokens` 也从大约 `1321` 压到了 `459`
+- 同一个 long-timeout 诊断样本里：
+  - turn 1 从大约 `103s` 降到了 `79s`
+  - 但 turn 2 从大约 `28s` 升到了 `54s`
+
+所以现在可以更具体地理解成：
+
+- “把首轮 prompt 压轻”这条方向是有效的，因为 turn 1 确实变短了
+- 但如果模型后半段输出变长、变啰嗦，整轮 wall-clock 还是会被吃回去
+- 这也是为什么后面不只是继续瘦 prompt，还要继续约束回答长度和首轮规划路径
+
 ## VS Code 里启动
 
 仓库已经带了：
@@ -474,6 +488,7 @@ python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b
 - [diagnostic-results/2026-04-24_010457_qwen2-5-coder-14b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_010457_qwen2-5-coder-14b.md)
 - [diagnostic-results/2026-04-24_104656_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_104656_qwen2-5-coder-7b.md)
 - [diagnostic-results/2026-04-24_110010_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_110010_qwen2-5-coder-7b.md)
+- [diagnostic-results/2026-04-24_111314_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_111314_qwen2-5-coder-7b.md)
 
 这轮新增的 payload 画像也给了我们一个更具体的基线：
 
@@ -494,3 +509,16 @@ python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b
 - 但同一轮长超时任务在这个样本里反而到了大约 `131s`
 
 这说明本地模型的时延波动确实很大。也正因为这样，我们更需要把每次架构调整都沉淀成报告，而不是只凭一轮体感下结论。
+
+而再下一轮的 `lean_read_only prompt` 诊断则把方向进一步钉清楚了：
+
+- `agent_payload_profile` 已经缩到：
+  - `prompt=lean_read_only`
+  - `est_tokens=459`
+  - `system_chars=1620`
+  - `tool_schema_chars=920`
+- 同一轮长超时任务里：
+  - turn 1 大约 `79.1s`
+  - turn 2 大约 `53.9s`
+
+这说明 prompt 瘦身对 turn 1 是有效的，但如果输出约束不够强，节省下来的时间还可能在 turn 2 被重新吃掉。

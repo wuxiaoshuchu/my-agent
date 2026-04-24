@@ -10,6 +10,7 @@ from context_engine import build_context_stats
 @dataclass(frozen=True)
 class RequestPayloadProfile:
     turn: int
+    prompt_profile: str
     total_messages: int
     non_system_messages: int
     estimated_tokens: int
@@ -36,6 +37,7 @@ def build_request_payload_profile(
     tool_schemas: Sequence[dict[str, object]] | None,
     *,
     turn: int,
+    prompt_profile: str = "full",
 ) -> RequestPayloadProfile:
     stats = build_context_stats(messages)
     system_messages = [
@@ -49,6 +51,7 @@ def build_request_payload_profile(
     serialized_tools = json.dumps(tool_schemas or [], ensure_ascii=False, sort_keys=True)
     return RequestPayloadProfile(
         turn=turn,
+        prompt_profile=prompt_profile,
         total_messages=stats.total_messages,
         non_system_messages=stats.non_system_messages,
         estimated_tokens=stats.estimated_tokens,
@@ -67,7 +70,7 @@ def summarize_payload_profile(profile: RequestPayloadProfile) -> str:
         else "off"
     )
     return (
-        f"turn={profile.turn} messages={profile.total_messages} "
+        f"turn={profile.turn} prompt={profile.prompt_profile} messages={profile.total_messages} "
         f"non_system={profile.non_system_messages} est_tokens={profile.estimated_tokens} "
         f"system_chars={profile.system_message_chars} memory_chars={profile.session_memory_chars} "
         f"tools={tools_label}"
@@ -87,6 +90,7 @@ def summarize_request_trace(trace: ModelRequestTrace) -> str:
 def render_payload_profile(profile: RequestPayloadProfile) -> str:
     lines = [
         f"- turn: {profile.turn}",
+        f"- prompt_profile: {profile.prompt_profile}",
         f"- total_messages: {profile.total_messages}",
         f"- non_system_messages: {profile.non_system_messages}",
         f"- estimated_tokens: {profile.estimated_tokens}",

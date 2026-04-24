@@ -13,6 +13,7 @@ from agent import (
     AgentSession,
     build_system_prompt,
     build_config,
+    current_prompt_profile,
     extract_fake_tool_calls,
     parse_args,
     resolve_active_goal,
@@ -81,6 +82,48 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
             self.assertIn("Always update CHANGELOG.md", prompt)
             self.assertIn("长期路线图（来自 way-to-claw-code.md）", prompt)
             self.assertIn("compact and session memory", prompt)
+
+    def test_build_system_prompt_slims_for_read_only_profile(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            (workspace / "HARNESS.md").write_text(
+                "Always update CHANGELOG.md\n" + ("rule\n" * 400),
+                encoding="utf-8",
+            )
+            (workspace / "way-to-claw-code.md").write_text(
+                "P1: compact and session memory\n" + ("roadmap\n" * 400),
+                encoding="utf-8",
+            )
+            config = AgentConfig(
+                model="demo",
+                base_url="http://localhost:11434/v1",
+                api_key="ollama",
+                num_ctx=4096,
+                max_turns=5,
+                workspace_root=workspace,
+                auto_approve=True,
+                command_timeout=5,
+                workspace_config_path=workspace / "jarvis.config.json",
+                runtime_sources=RuntimeConfigSources(
+                    model="default",
+                    base_url="default",
+                    num_ctx="default",
+                ),
+            )
+            full_runtime = ToolRuntime(workspace, auto_approve=True, command_timeout=5)
+            read_only_runtime = ToolRuntime(workspace, auto_approve=True, command_timeout=5)
+            read_only_runtime.update_tool_profile_for_task(
+                "读取 jarvis.config.json，告诉我默认 model",
+                active_goal="读取 jarvis.config.json，告诉我默认 model",
+            )
+
+            full_prompt = build_system_prompt(config, full_runtime)
+            read_only_prompt = build_system_prompt(config, read_only_runtime)
+
+            self.assertEqual(current_prompt_profile(read_only_runtime), "lean_read_only")
+            self.assertLess(len(read_only_prompt), len(full_prompt))
+            self.assertIn("当前任务模式", read_only_prompt)
+            self.assertNotIn("长期路线图（来自 way-to-claw-code.md）", read_only_prompt)
 
     def test_summary_report_includes_recent_activity_and_commit_hint(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -238,6 +281,7 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
                 content_chars=5,
                 payload=RequestPayloadProfile(
                     turn=1,
+                    prompt_profile="full",
                     total_messages=2,
                     non_system_messages=1,
                     estimated_tokens=42,
@@ -254,6 +298,7 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
 
         self.assertIn("性能观察", report)
         self.assertIn("当前工具画像：read_only", report)
+        self.assertIn("当前 prompt 画像：lean_read_only", report)
         self.assertIn("当前请求载荷", report)
         self.assertIn("最近模型请求", report)
         self.assertIn("3210ms", report)

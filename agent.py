@@ -58,8 +58,11 @@ DEFAULT_MAX_TURNS = 20
 DEFAULT_COMMAND_TIMEOUT = 30
 PROJECT_GUIDE_FILES = ("HARNESS.md", "CLAUDE.md")
 ROADMAP_GUIDE_FILES = ("way-to-claw-code.md",)
+FULL_WORKSPACE_SNAPSHOT_LIMIT = 30
+READ_ONLY_WORKSPACE_SNAPSHOT_LIMIT = 12
 MAX_PROJECT_GUIDE_CHARS = 4000
 MAX_ROADMAP_GUIDE_CHARS = 2600
+READ_ONLY_PROJECT_GUIDE_CHARS = 1400
 LOW_SIGNAL_GOAL_TEXTS = {
     "继续",
     "继续吧",
@@ -109,6 +112,27 @@ SYSTEM_PROMPT_TEMPLATE = """你是一个本地编码助手，用户在 Mac 终�
 ## 结束条件
 - 当你不再需要工具时，直接用自然语言给出结果
 - 不要在最终答案里再输出 JSON 或伪造 tool call"""
+
+READ_ONLY_SYSTEM_PROMPT_TEMPLATE = """你是一个本地编码助手，用户在 Mac 终端里和你对话。
+
+## 当前任务模式
+- 当前任务优先做只读分析，不要假装已经修改、运行或提交任何内容
+
+## 当前工作区
+- 工作区根目录：{workspace_root}
+- 根目录预览：
+{workspace_snapshot}
+
+## 当前可用工具
+{tool_summary}
+
+{project_guide}
+
+## 行为规则
+- 先用 list_files / grep_text 缩小范围，再用 read_file 精读
+- 如果 system memory 提到了历史摘要，把它当成压缩后的事实索引；需要精确细节时再读文件
+- 如果用户这一轮只说“继续 / continue”等低信息跟进，优先沿用 Session Memory 里的当前任务目标继续执行
+- 完成后输出简短纯文字总结，不要输出 JSON 或伪造 tool call"""
 
 
 @dataclass
@@ -213,23 +237,29 @@ def build_prompt_label(snapshot: RepoStatusSnapshot, *, auto_approve: bool) -> s
     return f"jarvis [{' '.join(parts)}]> "
 
 
+def current_prompt_profile(runtime: ToolRuntime) -> str:
+    if getattr(runtime, "active_tool_profile", "full") == "read_only":
+        return "lean_read_only"
+    return "full"
+
+
 def default_api_key(base_url: str) -> str:
     if "localhost" in base_url or "127.0.0.1" in base_url:
         return "ollama"
     return ""
 
 
-def build_workspace_snapshot(workspace_root: Path) -> str:
+def build_workspace_snapshot(workspace_root: Path, *, limit: int = FULL_WORKSPACE_SNAPSHOT_LIMIT) -> str:
     try:
         entries = sorted(workspace_root.iterdir(), key=lambda p: (p.is_file(), p.name))
     except OSError as exc:
         return f"(读取目录失败: {exc})"
 
     preview = []
-    for item in entries[:30]:
+    for item in entries[:limit]:
         suffix = "/" if item.is_dir() else ""
         preview.append(f"- {item.name}{suffix}")
-    if len(entries) > 30:
+    if len(entries) > limit:
         preview.append(f"- ...（共 {len(entries)} 项，已截断）")
     return "\n".join(preview) if preview else "(空目录)"
 
@@ -260,25 +290,39 @@ def load_workspace_guide(
     return ""
 
 
-def load_project_guide(workspace_root: Path) -> str:
+def load_project_guide(workspace_root: Path, *, max_chars: int = MAX_PROJECT_GUIDE_CHARS) -> str:
     return load_workspace_guide(
         workspace_root,
         filenames=PROJECT_GUIDE_FILES,
         heading="项目约定",
-        max_chars=MAX_PROJECT_GUIDE_CHARS,
+        max_chars=max_chars,
     )
 
 
-def load_roadmap_guide(workspace_root: Path) -> str:
+def load_roadmap_guide(workspace_root: Path, *, max_chars: int = MAX_ROADMAP_GUIDE_CHARS) -> str:
     return load_workspace_guide(
         workspace_root,
         filenames=ROADMAP_GUIDE_FILES,
         heading="长期路线图",
-        max_chars=MAX_ROADMAP_GUIDE_CHARS,
+        max_chars=max_chars,
     )
 
 
 def build_system_prompt(config: AgentConfig, runtime: ToolRuntime) -> str:
+    if runtime.active_tool_profile == "read_only":
+        return READ_ONLY_SYSTEM_PROMPT_TEMPLATE.format(
+            workspace_root=config.workspace_root,
+            workspace_snapshot=build_workspace_snapshot(
+                config.workspace_root,
+                limit=READ_ONLY_WORKSPACE_SNAPSHOT_LIMIT,
+            ),
+            tool_summary=runtime.tool_summary(),
+            project_guide=load_project_guide(
+                config.workspace_root,
+                max_chars=READ_ONLY_PROJECT_GUIDE_CHARS,
+            ),
+        )
+
     return SYSTEM_PROMPT_TEMPLATE.format(
         workspace_root=config.workspace_root,
         workspace_snapshot=build_workspace_snapshot(config.workspace_root),
@@ -530,11 +574,13 @@ class AgentSession:
             self.messages,
             self.runtime.tool_schemas,
             turn=len(request_traces) + 1,
+            prompt_profile=current_prompt_profile(self.runtime),
         )
         lines = [
             "性能观察",
             "",
             f"当前工具画像：{self.runtime.active_tool_profile}",
+            f"当前 prompt 画像：{current_prompt_profile(self.runtime)}",
             "当前请求载荷：",
             render_payload_profile(current_payload),
             "",
@@ -703,6 +749,7 @@ class AgentSession:
                 self.messages,
                 self.runtime.tool_schemas,
                 turn=turn,
+                prompt_profile=current_prompt_profile(self.runtime),
             )
             self.log_activity(
                 "model_request",

@@ -33,6 +33,7 @@ class PerformanceTraceTests(unittest.TestCase):
         )
 
         self.assertEqual(profile.turn, 1)
+        self.assertEqual(profile.prompt_profile, "full")
         self.assertEqual(profile.total_messages, 3)
         self.assertEqual(profile.non_system_messages, 1)
         self.assertTrue(profile.tools_enabled)
@@ -61,9 +62,11 @@ class PerformanceTraceTests(unittest.TestCase):
         rendered = render_payload_profile(profile)
 
         self.assertIn("turn=2", payload_summary)
+        self.assertIn("prompt=full", payload_summary)
         self.assertIn("tools=off", payload_summary)
         self.assertIn("timeout 20000ms", trace_summary)
         self.assertIn("APITimeoutError", trace_summary)
+        self.assertIn("- prompt_profile: full", rendered)
         self.assertIn("- tools_enabled: no", rendered)
 
 

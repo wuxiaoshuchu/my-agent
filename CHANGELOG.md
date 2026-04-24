@@ -4,6 +4,31 @@
 
 ## 2026-04-24
 
+### 给只读任务增加 lean prompt 画像，继续压首轮规划载荷
+
+- 更新 [agent.py](agent.py)，让 `read_only` 工具画像会自动配一套更轻的 `lean_read_only` system prompt。
+- 这套 lean prompt 会：
+  - 减少目录预览数量
+  - 只保留更短的项目约定
+  - 默认不再注入路线图
+  - 只保留只读分析需要的行为规则
+- 更新 [performance_trace.py](performance_trace.py)，请求画像现在会额外记录 `prompt_profile`。
+- 更新 [scripts/diagnose_runtime.py](scripts/diagnose_runtime.py)，让诊断里的 `agent_payload_profile` 也能看见当前 prompt 画像。
+- 补充 [tests/test_agent.py](tests/test_agent.py) 和 [tests/test_performance_trace.py](tests/test_performance_trace.py)，覆盖只读 prompt 会变短、payload 会记录 `prompt_profile`。
+- 加入新的诊断结果到 [diagnostic-results/2026-04-24_111314_qwen2-5-coder-7b.md](diagnostic-results/2026-04-24_111314_qwen2-5-coder-7b.md)。
+
+### 为什么这样改
+
+- 上一轮我们已经确认：只减少工具数还不够，system prompt 仍然是首轮请求里非常重的一块。
+- 所以这轮直接对 prompt 下手，把只读任务的 prompt 体积从大约 `4939 chars` 压到了 `1620 chars`，`est_tokens` 从大约 `1321` 压到了 `459`。
+- 真实诊断也给了一个很有价值的结论：turn 1 确实从大约 `103s` 降到了 `79s`，说明 prompt 瘦身方向是有效的；但 turn 2 又被更长的最终输出拖到了大约 `54s`，所以后面还得继续收回答长度和后半段路径。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `printf '/perf\n读取 jarvis.config.json，告诉我默认 model\n/perf\n/quit\n' | python3 agent.py --repl`
+- `python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b --output-dir diagnostic-results`
+
 ### 按任务缩小工具集，先减轻本地模型首轮规划负担
 
 - 更新 [tools.py](tools.py)，新增轻量 `tool profile` 推断：

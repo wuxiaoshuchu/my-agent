@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from openai import OpenAI
 
-from agent import AgentSession, build_config, build_system_prompt, parse_args
+from agent import AgentSession, build_config, build_system_prompt, current_prompt_profile, parse_args
 from performance_trace import (
     build_request_payload_profile,
     render_payload_profile,
@@ -293,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
         ],
         profile_runtime.tool_schemas,
         turn=1,
+        prompt_profile=current_prompt_profile(profile_runtime),
     )
 
     results = [
