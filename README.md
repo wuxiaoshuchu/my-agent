@@ -18,6 +18,7 @@
 - 仓库现在还有 [way-to-claw-code.md](way-to-claw-code.md)，用于记录长期路线图和后续待办
 - 仓库现在还有 [jarvis.config.json](jarvis.config.json) 和 [model-baseline.md](model-baseline.md)，用于固定默认模型和记录本机模型基线
 - 仓库现在还有 benchmark 任务集和结果目录，可以开始比较不同本地模型的实际表现
+- 仓库现在还有 context regression harness，可以稳定回归 `compact / session memory` 行为
 - 自带 `.vscode` 配置，可以在 VS Code 里一键启动 `jarvis`
 - REPL 现在有启动 banner、Git 状态头和动态提示符，更接近真正的 CLI 工具
 - 增加了 `edit_file` 工具和 `/patch` 命令，可以做局部编辑并直接预览改动
@@ -347,6 +348,31 @@ jarvis \
 - `14b` 在这台机器上的直连延迟波动很大：warm 大约 `3.9s`，冷态样本到过 `40s`
 - `14b` 带完整 `jarvis` prompt + tools 时，长任务有时要 `169s` 才能完成，有时只吐一个 fake tool call
 - 所以当前不建议把默认模型切到 `14b`
+
+## Context 回归
+
+仓库现在还自带：
+
+- [benchmarks/context_regression_cases.json](benchmarks/context_regression_cases.json)：`P1` 上下文层的固定回归样本
+- [context_regression_harness.py](context_regression_harness.py)：回归运行与报告逻辑
+- [scripts/regress_context_engine.py](scripts/regress_context_engine.py)：一键运行脚本
+- [context-regression-results/](context-regression-results/)：保存每次回归产出的 json / markdown
+
+跑一轮当前回归集：
+
+```bash
+python3 scripts/regress_context_engine.py
+```
+
+它现在重点盯三类风险：
+
+- fake tool call 变体还能不能被接住
+- `continue / 继续` 这类低信息 follow-up 会不会把 active goal 冲掉
+- 自动 compact 的阈值和 kept recent turns 有没有按预期工作
+
+当前首份正式结果已经在：
+
+- [context-regression-results/2026-04-24_093644.md](/Users/wuxiaoshuchu/Desktop/my-agent/context-regression-results/2026-04-24_093644.md)
 
 ## 运行时诊断
 

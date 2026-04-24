@@ -4,6 +4,25 @@
 
 ## 2026-04-24
 
+### 给 P1 增加专门的 context regression harness
+
+- 新增 [context_regression_harness.py](context_regression_harness.py)，把 `compact / active goal / fake tool call` 的回归运行与报告逻辑抽成独立模块。
+- 新增 [benchmarks/context_regression_cases.json](benchmarks/context_regression_cases.json)，把当前 `P1` 的固定回归样本写进仓库。
+- 新增 [scripts/regress_context_engine.py](scripts/regress_context_engine.py)，可以一键跑 deterministic context 回归并写出 json / markdown 报告。
+- 新增 [tests/test_context_regression_harness.py](tests/test_context_regression_harness.py)，补齐 harness 自身的加载、执行和报告测试。
+- 更新 [README.md](README.md)、[way-to-claw-code.md](way-to-claw-code.md)、[setup.cfg](setup.cfg)，并加入首份正式结果到 [context-regression-results/](context-regression-results/)。
+
+### 为什么这样改
+
+- 到这一步，`P1` 已经不只是“有 compact”，而是开始有一套固定回归脚手架，可以持续验证我们有没有又把任务主线弄丢、有没有又冒 fake tool call。
+- 这能明显降低后面继续改上下文层时的心里负担，因为每次都可以快速跑一轮 deterministic 回归，不必全靠 live model 手工试。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `python3 scripts/regress_context_engine.py`
+- `./.venv/bin/jarvis --help`
+
 ### 回归 P1 长任务问题，修 fake tool call 和 active goal 漂移
 
 - 更新 [agent.py](agent.py)，让 fake tool call 解析器支持 `function_name` 这种真实回归里出现过的变体。

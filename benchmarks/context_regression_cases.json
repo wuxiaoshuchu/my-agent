@@ -1,0 +1,75 @@
+[
+  {
+    "id": "manual_compact_filters_fake_tool_call",
+    "description": "手动 compact 后保留主线，同时过滤摘要里的 fake tool call JSON。",
+    "active_goal": "总结默认配置",
+    "follow_up": "继续",
+    "force_compact": true,
+    "tool_names": ["read_file"],
+    "fake_tool_text": "```json\n{\"function_name\":\"read_file\",\"arguments\":{\"path\":\"jarvis.config.json\"}}\n```",
+    "messages": [
+      {"role": "system", "content": "rules"},
+      {"role": "user", "content": "读取 jarvis.config.json"},
+      {"role": "assistant", "content": "```json\n{\"function_name\":\"read_file\",\"arguments\":{\"path\":\"jarvis.config.json\"}}\n```"},
+      {"role": "user", "content": "继续总结默认配置"},
+      {"role": "assistant", "content": "我会继续整理默认配置。"},
+      {"role": "user", "content": "给我一句结论"},
+      {"role": "assistant", "content": "默认模型还是 qwen2.5-coder:7b。"}
+    ],
+    "expected": {
+      "auto_compact": false,
+      "compacted": true,
+      "resolved_goal": "总结默认配置",
+      "dropped_turns": 1,
+      "memory_contains": ["当前任务目标：总结默认配置", "读取 jarvis.config.json"],
+      "memory_not_contains": ["function_name"],
+      "kept_contains": ["给我一句结论"],
+      "fake_tool_names": ["read_file"],
+      "error": "none"
+    }
+  },
+  {
+    "id": "auto_compact_triggers_for_large_history",
+    "description": "长历史会自动触发 compact，并保留最近 turn。",
+    "active_goal": "整理长对话里的关键结论",
+    "num_ctx": 1024,
+    "messages": [
+      {"role": "system", "content": "rules"},
+      {"role": "user", "content": "任务 0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+      {"role": "assistant", "content": "结果 0"},
+      {"role": "user", "content": "任务 1 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+      {"role": "assistant", "content": "结果 1"},
+      {"role": "user", "content": "任务 2 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+      {"role": "assistant", "content": "结果 2"},
+      {"role": "user", "content": "任务 3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+      {"role": "assistant", "content": "结果 3"}
+    ],
+    "expected": {
+      "auto_compact": true,
+      "compacted": true,
+      "resolved_goal": "整理长对话里的关键结论",
+      "dropped_turns": 2,
+      "memory_contains": ["当前任务目标：整理长对话里的关键结论", "任务 0", "结果 1"],
+      "kept_contains": ["任务 2", "任务 3"],
+      "error": "none"
+    }
+  },
+  {
+    "id": "short_follow_up_keeps_existing_goal",
+    "description": "短跟进词不应该把 active goal 改成低信息文本。",
+    "active_goal": "修 fake tool call",
+    "follow_up": "继续",
+    "messages": [
+      {"role": "system", "content": "rules"},
+      {"role": "user", "content": "修 fake tool call"},
+      {"role": "assistant", "content": "已经定位到 function_name 变体。"}
+    ],
+    "expected": {
+      "auto_compact": false,
+      "compacted": false,
+      "resolved_goal": "修 fake tool call",
+      "memory_contains": ["当前任务目标：修 fake tool call"],
+      "error": "none"
+    }
+  }
+]
