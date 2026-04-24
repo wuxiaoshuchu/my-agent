@@ -4,6 +4,31 @@
 
 ## 2026-04-24
 
+### 继续推进 P2，把工具系统拆成 registry 和 runtime 两层
+
+- 新增 [tool_registry.py](tool_registry.py)，把工具元数据、schema、`read_only/full` 画像推断和 scheduler snapshot 类型从 `tools.py` 里抽离出来。
+- 新增 [tool_runtime.py](tool_runtime.py)，把真正的工具执行层拆出来：
+  - `FileToolExecutor`
+  - `CommandToolExecutor`
+  - `ToolRuntime` 调度外壳
+- 更新 [tools.py](tools.py)，现在它变成兼容入口，对外继续暴露 `ToolRuntime`、`ToolSpec`、`infer_tool_profile` 等现有 API。
+- 这一轮对外行为基本不变，但内部职责已经更清楚了：
+  - registry 只负责“工具是什么”
+  - runtime 只负责“工具怎么跑”
+  - `ToolRuntime` 更像调度/编排层，而不是把所有逻辑都塞在一个文件里
+
+### 为什么这样改
+
+- 上一轮我们已经给工具加上了 metadata registry，但真正的执行层仍然全堆在 `tools.py` 里。
+- 如果继续往前做并发、串行、审批规则和工具耗时统计，不先拆文件边界，后面只会越来越难改。
+- 这一轮的重点不是增加用户可见新功能，而是把结构从“大一统工具文件”推进成“metadata + runtime + compatibility facade”，这样后面的 `P2` 才能更稳地往前走。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `python3 agent.py --help`
+- `printf '/tools\n/perf\n/quit\n' | python3 agent.py --repl`
+
 ### 给工具系统补上 metadata registry，开始进入 P2 Tool Scheduler
 
 - 更新 [tools.py](tools.py)，把原来平铺在 `ToolRuntime.__post_init__()` 里的 schema/summary 常量，抽成统一的 `ToolSpec` registry。

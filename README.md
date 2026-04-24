@@ -17,6 +17,7 @@
 - 增加了 `/perf` 和模型请求追踪，可以看到当前请求载荷、tools schema 体积和最近几轮模型请求耗时
 - 现在会按任务意图自适应缩小工具集：读取/搜索类任务优先只暴露只读工具
 - 工具系统现在带有 metadata registry，`/tools` 和 `/perf` 能直接看见当前调度画像、并发候选和审批型工具
+- 工具实现层已经拆成 `tool_registry.py + tool_runtime.py + tools.py facade`，后续继续做 scheduler 时不必再在单文件里硬堆逻辑
 - 仓库现在有 [HARNESS.md](HARNESS.md) 和 [CHANGELOG.md](CHANGELOG.md)，方便 agent 继承规则和回看成长史
 - 仓库现在还有 [way-to-claw-code.md](way-to-claw-code.md)，用于记录长期路线图和后续待办
 - 仓库现在还有 [jarvis.config.json](jarvis.config.json) 和 [model-baseline.md](model-baseline.md)，用于固定默认模型和记录本机模型基线
@@ -189,6 +190,14 @@ python agent.py
 - 哪些会改变会话外部状态
 
 这一步的意义主要是架构，不是性能。它给后面的 `P2 Tool Scheduler` 打了统一地基，让并发、串行、审批和工具耗时统计都能挂在同一套 registry 上。
+
+而再下一步，这套工具层也已经不再是单文件实现了：
+
+- [tool_registry.py](tool_registry.py)：负责工具元数据、schema 和画像推断
+- [tool_runtime.py](tool_runtime.py)：负责文件工具、命令工具和 `ToolRuntime` 编排
+- [tools.py](tools.py)：只保留兼容入口，避免现有调用方大面积改动
+
+这一步的好处是后面继续推进 `P2` 时，我们可以在不打碎外部 API 的前提下，继续细拆调度器、审批层和工具执行层。
 
 现在 `jarvis` 还会对任务做一个很轻量的工具画像判断：
 

@@ -187,6 +187,10 @@
   - 每个工具都带有 `category / read_only / mutates_workspace / needs_approval / can_parallelize / affects_context`
   - `ToolRuntime` 已经能从 registry 派生 `tool_schemas`、工具摘要和 scheduler snapshot
   - `/tools` 和 `/perf` 也已经能直接显示当前调度画像
+- 当前又往前拆了一层：
+  - `tool_registry.py` 负责工具定义与画像推断
+  - `tool_runtime.py` 负责文件工具、命令工具和 runtime 编排
+  - `tools.py` 保留兼容 facade，避免上层大面积改 import
 - 当前工具画像还是基于 `full / read_only` 两档切换，但已经不再只是一些零散常量，而是开始长成真正的调度层
 - [ ] 实现只读工具批量并发
   - 典型目标：`read_file` / `grep_text` / `list_files`
