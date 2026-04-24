@@ -8,10 +8,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from performance_trace import (
     ModelRequestTrace,
+    ToolExecutionTrace,
     build_request_payload_profile,
     render_payload_profile,
     summarize_payload_profile,
     summarize_request_trace,
+    summarize_tool_trace,
 )
 
 
@@ -68,6 +70,24 @@ class PerformanceTraceTests(unittest.TestCase):
         self.assertIn("APITimeoutError", trace_summary)
         self.assertIn("- prompt_profile: full", rendered)
         self.assertIn("- tools_enabled: no", rendered)
+
+    def test_summarize_tool_trace_includes_status_and_mode(self):
+        trace = ToolExecutionTrace(
+            tool_name="grep_text",
+            category="discovery",
+            status="ok",
+            duration_ms=87,
+            output_chars=240,
+            read_only=True,
+            needs_approval=False,
+        )
+
+        summary = summarize_tool_trace(trace)
+
+        self.assertIn("grep_text [discovery] ok 87ms", summary)
+        self.assertIn("output_chars=240", summary)
+        self.assertIn("read-only", summary)
+        self.assertIn("no-approval", summary)
 
 
 if __name__ == "__main__":

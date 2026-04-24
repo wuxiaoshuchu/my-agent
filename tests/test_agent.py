@@ -273,6 +273,21 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
             {
                 "tool_schemas": [],
                 "active_tool_profile": "read_only",
+                "tool_traces": [
+                    type(
+                        "ToolTrace",
+                        (),
+                        {
+                            "tool_name": "read_file",
+                            "category": "filesystem",
+                            "status": "ok",
+                            "duration_ms": 45,
+                            "output_chars": 128,
+                            "read_only": True,
+                            "needs_approval": False,
+                        },
+                    )()
+                ],
                 "scheduler_brief": lambda self: "active=3 read_only=3 mutating=0 approval=0 parallel=3 context=0",
             },
         )()
@@ -306,6 +321,8 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
         self.assertIn("当前 prompt 画像：lean_read_only", report)
         self.assertIn("当前请求载荷", report)
         self.assertIn("最近模型请求", report)
+        self.assertIn("最近工具执行", report)
+        self.assertIn("read_file [filesystem] ok 45ms", report)
         self.assertIn("3210ms", report)
 
     def test_add_user_message_switches_to_read_only_tool_profile(self):

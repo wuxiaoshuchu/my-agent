@@ -32,6 +32,17 @@ class ModelRequestTrace:
     error: str = ""
 
 
+@dataclass(frozen=True)
+class ToolExecutionTrace:
+    tool_name: str
+    category: str
+    status: str
+    duration_ms: int
+    output_chars: int
+    read_only: bool
+    needs_approval: bool
+
+
 def build_request_payload_profile(
     messages: Sequence[dict[str, object]],
     tool_schemas: Sequence[dict[str, object]] | None,
@@ -85,6 +96,15 @@ def summarize_request_trace(trace: ModelRequestTrace) -> str:
     if trace.error:
         prefix += f" error={trace.error}"
     return f"{prefix} | {summarize_payload_profile(trace.payload)}"
+
+
+def summarize_tool_trace(trace: ToolExecutionTrace) -> str:
+    mode = "read-only" if trace.read_only else "mutating"
+    approval = "approval" if trace.needs_approval else "no-approval"
+    return (
+        f"{trace.tool_name} [{trace.category}] {trace.status} {trace.duration_ms}ms "
+        f"output_chars={trace.output_chars} {mode} {approval}"
+    )
 
 
 def render_payload_profile(profile: RequestPayloadProfile) -> str:

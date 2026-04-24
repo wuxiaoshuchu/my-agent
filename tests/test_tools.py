@@ -122,6 +122,32 @@ class ToolRuntimeTests(unittest.TestCase):
         self.assertIn("meta: category=command; mutating, serial, approval, context", report)
         self.assertIn("meta: category=filesystem; read-only, parallel", report)
 
+    def test_execute_tool_records_tool_trace(self):
+        result = self.runtime.execute_tool(
+            "write_file",
+            {"path": "notes/trace.txt", "content": "hello"},
+        )
+
+        self.assertIn("OK:", result)
+        trace = self.runtime.tool_traces[-1]
+        self.assertEqual(trace.tool_name, "write_file")
+        self.assertEqual(trace.category, "filesystem")
+        self.assertEqual(trace.status, "ok")
+        self.assertFalse(trace.read_only)
+        self.assertTrue(trace.needs_approval)
+        self.assertGreaterEqual(trace.output_chars, len(result))
+
+    def test_execute_tool_records_denied_status(self):
+        runtime = CapturingToolRuntime(self.workspace, allow=False)
+
+        result = runtime.execute_tool("run_command", {"cmd": "pwd"})
+
+        self.assertIn("DENIED:", result)
+        trace = runtime.tool_traces[-1]
+        self.assertEqual(trace.tool_name, "run_command")
+        self.assertEqual(trace.status, "denied")
+        self.assertEqual(trace.category, "command")
+
     def test_edit_file_replaces_exact_snippet_and_returns_patch(self):
         self.runtime.write_file("src/app.py", "print('hello')\nprint('bye')\n")
         result = self.runtime.edit_file(
@@ -280,6 +306,8 @@ class ToolRuntimeTests(unittest.TestCase):
     def test_execute_tool_reports_invalid_parameters(self):
         result = self.runtime.execute_tool("read_file", {})
         self.assertIn("ERROR: 工具参数不合法 read_file", result)
+        trace = self.runtime.tool_traces[-1]
+        self.assertEqual(trace.status, "error")
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ from context_engine import (
 )
 from performance_trace import (
     ModelRequestTrace,
+    summarize_tool_trace,
     build_request_payload_profile,
     render_payload_profile,
     summarize_request_trace,
@@ -570,6 +571,7 @@ class AgentSession:
 
     def performance_report(self, limit: int = 5) -> str:
         request_traces = getattr(self, "request_traces", [])
+        tool_traces = getattr(self.runtime, "tool_traces", [])
         current_payload = build_request_payload_profile(
             self.messages,
             self.runtime.tool_schemas,
@@ -587,14 +589,22 @@ class AgentSession:
             "",
             "最近模型请求：",
         ]
-        if not request_traces:
+        if request_traces:
+            lines.extend(
+                f"- {summarize_request_trace(trace)}"
+                for trace in request_traces[-limit:]
+            )
+        else:
             lines.append("- 还没有模型请求。")
-            return "\n".join(lines)
 
-        lines.extend(
-            f"- {summarize_request_trace(trace)}"
-            for trace in request_traces[-limit:]
-        )
+        lines.extend(["", "最近工具执行："])
+        if tool_traces:
+            lines.extend(
+                f"- {summarize_tool_trace(trace)}"
+                for trace in tool_traces[-limit:]
+            )
+        else:
+            lines.append("- 还没有工具执行。")
         return "\n".join(lines)
 
     def render_repl_header(self) -> str:

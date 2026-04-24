@@ -196,7 +196,9 @@
   - 典型目标：`read_file` / `grep_text` / `list_files`
 - [ ] 保持写工具串行
   - `write_file` / `edit_file` / `apply_patch` / `run_command`
-- [ ] 记录每个工具的耗时与结果大小
+- [x] 记录每个工具的耗时与结果大小
+  - `ToolRuntime.execute_tool()` 现在已经会记录工具执行 trace，并接到 `/perf`
+  - trace 当前包含：工具名、category、状态、耗时、输出大小、只读/审批属性
 
 ### 完成标准
 

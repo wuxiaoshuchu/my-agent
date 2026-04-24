@@ -8,8 +8,10 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import TYPE_CHECKING
 
+from performance_trace import ToolExecutionTrace
 from tool_registry import (
     DEFAULT_TOOL_NAMES,
     READ_ONLY_TOOL_NAMES,
@@ -861,6 +863,7 @@ class ToolRuntime:
         self.active_tool_names: tuple[str, ...] = ()
         self.active_tool_specs: tuple[ToolSpec, ...] = ()
         self.tool_schemas: list[dict[str, object]] = []
+        self.tool_traces: list[ToolExecutionTrace] = []
         self.set_tool_profile("full")
 
     def set_tool_profile(self, profile: str) -> None:
@@ -950,6 +953,34 @@ class ToolRuntime:
                 f"  meta: category={spec.category}; {spec.scheduler_flags()}"
             )
         return "\n".join(lines)
+
+    def tool_trace_summary(self, limit: int = 5) -> list[str]:
+        return [
+            f"- {trace.tool_name} [{trace.category}] {trace.status} {trace.duration_ms}ms "
+            f"output_chars={trace.output_chars}"
+            for trace in self.tool_traces[-limit:]
+        ]
+
+    def _record_tool_trace(
+        self,
+        name: str,
+        *,
+        status: str,
+        duration_ms: int,
+        output_chars: int,
+    ) -> None:
+        spec = self._tool_specs_by_name.get(name)
+        self.tool_traces.append(
+            ToolExecutionTrace(
+                tool_name=name,
+                category=spec.category if spec else "unknown",
+                status=status,
+                duration_ms=duration_ms,
+                output_chars=output_chars,
+                read_only=spec.read_only if spec else False,
+                needs_approval=spec.needs_approval if spec else False,
+            )
+        )
 
     def _confirm(
         self,
@@ -1159,11 +1190,33 @@ class ToolRuntime:
     def execute_tool(self, name: str, args: dict) -> str:
         handler = self._tool_handlers.get(name)
         if handler is None:
-            return f"ERROR: 未知工具 {name}"
+            result = f"ERROR: 未知工具 {name}"
+            self._record_tool_trace(
+                name,
+                status="error",
+                duration_ms=0,
+                output_chars=len(result),
+            )
+            return result
+        start = perf_counter()
         try:
-            return handler(**args)
+            result = handler(**args)
         except TypeError as exc:
-            return f"ERROR: 工具参数不合法 {name}: {exc}"
+            result = f"ERROR: 工具参数不合法 {name}: {exc}"
+        duration_ms = int((perf_counter() - start) * 1000)
+        if result.startswith("DENIED:"):
+            status = "denied"
+        elif result.startswith("ERROR:"):
+            status = "error"
+        else:
+            status = "ok"
+        self._record_tool_trace(
+            name,
+            status=status,
+            duration_ms=duration_ms,
+            output_chars=len(result),
+        )
+        return result
 
 
 __all__ = ["ToolRuntime", "infer_tool_profile"]

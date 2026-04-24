@@ -4,6 +4,35 @@
 
 ## 2026-04-24
 
+### 给 P2 补上工具执行观测，把耗时和输出大小接进 /perf
+
+- 更新 [tool_runtime.py](tool_runtime.py)，现在 `ToolRuntime.execute_tool()` 会记录每次工具执行的 trace：
+  - 工具名
+  - category
+  - 状态（`ok / denied / error`）
+  - 耗时
+  - 输出字符数
+  - 是否只读
+  - 是否需要审批
+- 更新 [performance_trace.py](performance_trace.py)，新增 `ToolExecutionTrace` 和 `summarize_tool_trace()`。
+- 更新 [agent.py](agent.py)，`/perf` 现在除了模型请求外，也会显示最近工具执行轨迹。
+- 补充 [tests/test_tools.py](tests/test_tools.py)、[tests/test_agent.py](tests/test_agent.py)、[tests/test_performance_trace.py](tests/test_performance_trace.py)，覆盖工具 trace 的记录、拒绝/错误状态以及 `/perf` 输出。
+
+### 为什么这样改
+
+- 现在的 `P2` 已经有了 registry 和 runtime 分层，但如果没有运行时观测，scheduler 还只是“知道工具的静态属性”，不知道它们在真实任务里跑得怎么样。
+- 把工具执行 trace 接进来之后，后面继续做：
+  - 只读工具并发
+  - 写工具串行
+  - 工具耗时统计
+  - scheduler 决策回看
+  都有了正式的观测入口。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `printf '/perf\n读取 jarvis.config.json，告诉我默认 model\n/perf\n/quit\n' | python3 agent.py --repl`
+
 ### 继续推进 P2，把工具系统拆成 registry 和 runtime 两层
 
 - 新增 [tool_registry.py](tool_registry.py)，把工具元数据、schema、`read_only/full` 画像推断和 scheduler snapshot 类型从 `tools.py` 里抽离出来。
