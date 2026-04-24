@@ -270,7 +270,11 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
         session.runtime = type(
             "Runtime",
             (),
-            {"tool_schemas": [], "active_tool_profile": "read_only"},
+            {
+                "tool_schemas": [],
+                "active_tool_profile": "read_only",
+                "scheduler_brief": lambda self: "active=3 read_only=3 mutating=0 approval=0 parallel=3 context=0",
+            },
         )()
         session.request_traces = [
             ModelRequestTrace(
@@ -298,6 +302,7 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
 
         self.assertIn("性能观察", report)
         self.assertIn("当前工具画像：read_only", report)
+        self.assertIn("当前调度画像：active=3 read_only=3", report)
         self.assertIn("当前 prompt 画像：lean_read_only", report)
         self.assertIn("当前请求载荷", report)
         self.assertIn("最近模型请求", report)

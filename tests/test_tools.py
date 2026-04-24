@@ -95,6 +95,33 @@ class ToolRuntimeTests(unittest.TestCase):
         output = self.runtime.run_command("pwd")
         self.assertIn(str(self.workspace), output)
 
+    def test_scheduler_snapshot_is_derived_from_tool_metadata(self):
+        self.runtime.update_tool_profile_for_task(
+            "读取 jarvis.config.json，告诉我默认 model"
+        )
+
+        snapshot = self.runtime.scheduler_snapshot()
+
+        self.assertEqual(snapshot.profile, "read_only")
+        self.assertEqual(
+            snapshot.active_tools,
+            ("read_file", "list_files", "grep_text"),
+        )
+        self.assertEqual(snapshot.read_only_tools, snapshot.active_tools)
+        self.assertEqual(snapshot.mutating_tools, ())
+        self.assertEqual(snapshot.approval_tools, ())
+        self.assertEqual(snapshot.parallel_tools, snapshot.active_tools)
+        self.assertEqual(snapshot.context_tools, ())
+
+    def test_tool_catalog_report_includes_scheduler_metadata(self):
+        report = self.runtime.tool_catalog_report()
+
+        self.assertIn("工具目录", report)
+        self.assertIn("tool profile: full", report)
+        self.assertIn("run_command", report)
+        self.assertIn("meta: category=command; mutating, serial, approval, context", report)
+        self.assertIn("meta: category=filesystem; read-only, parallel", report)
+
     def test_edit_file_replaces_exact_snippet_and_returns_patch(self):
         self.runtime.write_file("src/app.py", "print('hello')\nprint('bye')\n")
         result = self.runtime.edit_file(
@@ -249,6 +276,10 @@ class ToolRuntimeTests(unittest.TestCase):
         self.assertEqual(len(runtime.hunk_reviews), 2)
         self.assertIn("status: reviewing hunk 2/2", runtime.hunk_reviews[1][2])
         self.assertIn("progress: accepted 1 | skipped 0 | remaining 1", runtime.hunk_reviews[1][2])
+
+    def test_execute_tool_reports_invalid_parameters(self):
+        result = self.runtime.execute_tool("read_file", {})
+        self.assertIn("ERROR: 工具参数不合法 read_file", result)
 
 
 if __name__ == "__main__":

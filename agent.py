@@ -580,6 +580,7 @@ class AgentSession:
             "性能观察",
             "",
             f"当前工具画像：{self.runtime.active_tool_profile}",
+            f"当前调度画像：{getattr(self.runtime, 'scheduler_brief', lambda: 'unavailable')()}",
             f"当前 prompt 画像：{current_prompt_profile(self.runtime)}",
             "当前请求载荷：",
             render_payload_profile(current_payload),
@@ -930,7 +931,8 @@ class AgentSession:
             return True
 
         if command == "/tools":
-            print(self.runtime.tool_summary())
+            reporter = getattr(self.runtime, "tool_catalog_report", self.runtime.tool_summary)
+            print(reporter())
             return True
 
         if command == "/pwd":

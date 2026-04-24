@@ -16,6 +16,7 @@
 - 增加了最小 `context engine`：会估算消息/tokens，并支持 `session memory + /compact`
 - 增加了 `/perf` 和模型请求追踪，可以看到当前请求载荷、tools schema 体积和最近几轮模型请求耗时
 - 现在会按任务意图自适应缩小工具集：读取/搜索类任务优先只暴露只读工具
+- 工具系统现在带有 metadata registry，`/tools` 和 `/perf` 能直接看见当前调度画像、并发候选和审批型工具
 - 仓库现在有 [HARNESS.md](HARNESS.md) 和 [CHANGELOG.md](CHANGELOG.md)，方便 agent 继承规则和回看成长史
 - 仓库现在还有 [way-to-claw-code.md](way-to-claw-code.md)，用于记录长期路线图和后续待办
 - 仓库现在还有 [jarvis.config.json](jarvis.config.json) 和 [model-baseline.md](model-baseline.md)，用于固定默认模型和记录本机模型基线
@@ -177,6 +178,17 @@ python agent.py
 - 回看最近几轮模型请求的耗时、tool call 数和内容长度
 
 这对定位“到底慢在模型本身，还是 prompt / tools 载荷过大”很有帮助。
+
+`/tools` 现在也不只是列出工具名了。它会直接暴露当前工具画像背后的调度语义：
+
+- 当前激活了哪些工具
+- 哪些是 `read_only`
+- 哪些会修改工作区
+- 哪些默认需要审批
+- 哪些是未来的并发候选
+- 哪些会改变会话外部状态
+
+这一步的意义主要是架构，不是性能。它给后面的 `P2 Tool Scheduler` 打了统一地基，让并发、串行、审批和工具耗时统计都能挂在同一套 registry 上。
 
 现在 `jarvis` 还会对任务做一个很轻量的工具画像判断：
 

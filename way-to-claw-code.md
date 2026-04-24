@@ -182,9 +182,12 @@
   - 是否可并发
   - 是否需要审批
   - 是否会修改上下文状态
-- 当前已经先做了最小一步：按任务意图在 `full / read_only` 两个画像之间切换，优先减少本地模型首轮规划时看到的工具数
-- 下一步更值得做的是继续压 system prompt，或者把首轮规划和首轮工具选择拆得更轻，而不是只继续加更多 heuristics
-- 如果继续留在这一条线上，最值的下一步是给只读回答加更强的“默认简短、不要回贴整段文件”约束，避免 turn 2 把节省下来的时间重新吃回去
+- 当前已经完成了 `P2` 的第一层地基：
+  - 工具现在统一注册在 `ToolSpec registry`
+  - 每个工具都带有 `category / read_only / mutates_workspace / needs_approval / can_parallelize / affects_context`
+  - `ToolRuntime` 已经能从 registry 派生 `tool_schemas`、工具摘要和 scheduler snapshot
+  - `/tools` 和 `/perf` 也已经能直接显示当前调度画像
+- 当前工具画像还是基于 `full / read_only` 两档切换，但已经不再只是一些零散常量，而是开始长成真正的调度层
 - [ ] 实现只读工具批量并发
   - 典型目标：`read_file` / `grep_text` / `list_files`
 - [ ] 保持写工具串行

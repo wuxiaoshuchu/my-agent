@@ -4,6 +4,45 @@
 
 ## 2026-04-24
 
+### 给工具系统补上 metadata registry，开始进入 P2 Tool Scheduler
+
+- 更新 [tools.py](tools.py)，把原来平铺在 `ToolRuntime.__post_init__()` 里的 schema/summary 常量，抽成统一的 `ToolSpec` registry。
+- 现在每个工具都自带一份稳定元数据：
+  - `category`
+  - `read_only`
+  - `mutates_workspace`
+  - `needs_approval`
+  - `can_parallelize`
+  - `affects_context`
+- `ToolRuntime` 现在不再靠一串 `if/elif` 维护 schema 列表，而是从 registry 派生：
+  - 当前激活工具
+  - `tool_schemas`
+  - 工具摘要
+  - scheduler snapshot
+- 新增 `scheduler_snapshot()`、`scheduler_brief()`、`scheduler_summary()` 和 `tool_catalog_report()`，让工具系统第一次真正带上“调度语义”。
+- 更新 [agent.py](agent.py)：
+  - `/tools` 现在会显示工具目录 + 当前调度画像
+  - `/perf` 现在会额外显示当前调度画像摘要
+- 补充 [tests/test_tools.py](tests/test_tools.py) 和 [tests/test_agent.py](tests/test_agent.py)，覆盖 metadata 派生的 scheduler snapshot、工具目录输出和性能报告。
+
+### 为什么这样改
+
+- 这轮不是为了“立刻更快”，而是为了让后面的 `P2` 真正有地基。
+- 之前虽然已经有 `full / read_only` 两种工具画像，但本质上还是一些常量和启发式拼起来的；这不足以继续长成更成熟的 scheduler。
+- 把工具元数据正规化之后，后面要做：
+  - 只读工具并发
+  - 写工具串行
+  - 更细粒度审批
+  - 工具耗时统计
+  - 按工具类别裁剪 prompt / tool exposure
+  就都有了统一入口。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `python3 agent.py --help`
+- `printf '/tools\n/perf\n/quit\n' | python3 agent.py --repl`
+
 ### 给只读任务增加 lean prompt 画像，继续压首轮规划载荷
 
 - 更新 [agent.py](agent.py)，让 `read_only` 工具画像会自动配一套更轻的 `lean_read_only` system prompt。

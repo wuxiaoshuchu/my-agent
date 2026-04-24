@@ -19,16 +19,6 @@ PATCH_REVIEW_PANEL_WIDTH = 78
 DEFAULT_LIST_LIMIT = 200
 DEFAULT_GREP_LIMIT = 50
 MAX_TEXT_FILE_SIZE = 512 * 1024
-READ_ONLY_TOOL_NAMES = ("read_file", "list_files", "grep_text")
-TOOL_SUMMARY_LINES = {
-    "read_file": "- read_file(path): 读取工作区内文本文件",
-    "write_file": "- write_file(path, content): 整文件写入，适合新建或重写文件",
-    "edit_file": "- edit_file(path, old_text, new_text, replace_all=False): 精确替换文件中的一段文本",
-    "apply_patch": "- apply_patch(path, edits): 一次应用多个精确文本替换，适合多处局部改动",
-    "list_files": "- list_files(path='.', glob='**/*', limit=200): 列目录或文件",
-    "grep_text": "- grep_text(pattern, path='.', limit=50): 搜索文本",
-    "run_command": "- run_command(cmd): 在工作区根目录执行 shell，执行前会请求确认",
-}
 READ_ONLY_PROFILE_MARKERS = (
     "读取",
     "查看",
@@ -77,6 +67,261 @@ WRITE_PROFILE_MARKERS = (
     "run ",
     "patch",
 )
+
+
+def _build_function_schema(
+    name: str,
+    description: str,
+    *,
+    properties: dict[str, object] | None = None,
+    required: tuple[str, ...] = (),
+) -> dict[str, object]:
+    parameters: dict[str, object] = {
+        "type": "object",
+        "properties": properties or {},
+    }
+    if required:
+        parameters["required"] = list(required)
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": parameters,
+        },
+    }
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    name: str
+    summary_line: str
+    schema: dict[str, object]
+    category: str
+    read_only: bool
+    mutates_workspace: bool
+    needs_approval: bool
+    can_parallelize: bool
+    affects_context: bool
+
+    def scheduler_flags(self) -> str:
+        flags = ["read-only" if self.read_only else "mutating"]
+        flags.append("parallel" if self.can_parallelize else "serial")
+        if self.needs_approval:
+            flags.append("approval")
+        if self.affects_context:
+            flags.append("context")
+        return ", ".join(flags)
+
+
+@dataclass(frozen=True)
+class ToolSchedulerSnapshot:
+    profile: str
+    active_tools: tuple[str, ...]
+    read_only_tools: tuple[str, ...]
+    mutating_tools: tuple[str, ...]
+    approval_tools: tuple[str, ...]
+    parallel_tools: tuple[str, ...]
+    context_tools: tuple[str, ...]
+
+
+def _tool_list_label(names: tuple[str, ...]) -> str:
+    return ", ".join(names) if names else "(none)"
+
+
+TOOL_REGISTRY = (
+    ToolSpec(
+        name="read_file",
+        summary_line="- read_file(path): 读取工作区内文本文件",
+        schema=_build_function_schema(
+            "read_file",
+            "读取工作区内文本文件内容。",
+            properties={
+                "path": {"type": "string", "description": "文件路径"},
+            },
+            required=("path",),
+        ),
+        category="filesystem",
+        read_only=True,
+        mutates_workspace=False,
+        needs_approval=False,
+        can_parallelize=True,
+        affects_context=False,
+    ),
+    ToolSpec(
+        name="write_file",
+        summary_line="- write_file(path, content): 整文件写入，适合新建或重写文件",
+        schema=_build_function_schema(
+            "write_file",
+            "写入文本文件，覆盖已有内容。适合创建新文件或整文件重写。执行前通常会询问用户确认。",
+            properties={
+                "path": {"type": "string", "description": "文件路径"},
+                "content": {
+                    "type": "string",
+                    "description": "要写入的完整内容",
+                },
+            },
+            required=("path", "content"),
+        ),
+        category="filesystem",
+        read_only=False,
+        mutates_workspace=True,
+        needs_approval=True,
+        can_parallelize=False,
+        affects_context=True,
+    ),
+    ToolSpec(
+        name="edit_file",
+        summary_line="- edit_file(path, old_text, new_text, replace_all=False): 精确替换文件中的一段文本",
+        schema=_build_function_schema(
+            "edit_file",
+            "按精确文本片段编辑文件。适合局部修改，不用整文件重写。",
+            properties={
+                "path": {"type": "string", "description": "文件路径"},
+                "old_text": {
+                    "type": "string",
+                    "description": "要替换的原始文本片段，必须与文件内容完全匹配",
+                },
+                "new_text": {
+                    "type": "string",
+                    "description": "替换后的文本片段",
+                },
+                "replace_all": {
+                    "type": "boolean",
+                    "description": "是否替换全部匹配项，默认 false",
+                },
+            },
+            required=("path", "old_text", "new_text"),
+        ),
+        category="filesystem",
+        read_only=False,
+        mutates_workspace=True,
+        needs_approval=True,
+        can_parallelize=False,
+        affects_context=True,
+    ),
+    ToolSpec(
+        name="apply_patch",
+        summary_line="- apply_patch(path, edits): 一次应用多个精确文本替换，适合多处局部改动",
+        schema=_build_function_schema(
+            "apply_patch",
+            "对同一个文件按顺序应用多个精确文本替换。适合一次完成多处局部修改。",
+            properties={
+                "path": {"type": "string", "description": "文件路径"},
+                "edits": {
+                    "type": "array",
+                    "description": "按顺序应用的编辑列表",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_text": {
+                                "type": "string",
+                                "description": "要替换的原始文本片段",
+                            },
+                            "new_text": {
+                                "type": "string",
+                                "description": "替换后的文本片段",
+                            },
+                            "replace_all": {
+                                "type": "boolean",
+                                "description": "是否替换全部匹配项，默认 false",
+                            },
+                        },
+                        "required": ["old_text", "new_text"],
+                    },
+                },
+            },
+            required=("path", "edits"),
+        ),
+        category="patch",
+        read_only=False,
+        mutates_workspace=True,
+        needs_approval=True,
+        can_parallelize=False,
+        affects_context=True,
+    ),
+    ToolSpec(
+        name="list_files",
+        summary_line="- list_files(path='.', glob='**/*', limit=200): 列目录或文件",
+        schema=_build_function_schema(
+            "list_files",
+            "列出工作区内的文件或目录，适合做轻量探索。",
+            properties={
+                "path": {
+                    "type": "string",
+                    "description": "起始目录或文件，默认当前工作区根目录",
+                },
+                "glob": {
+                    "type": "string",
+                    "description": "glob 模式，例如 **/*.py",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "最多返回多少项，默认 200",
+                },
+            },
+        ),
+        category="discovery",
+        read_only=True,
+        mutates_workspace=False,
+        needs_approval=False,
+        can_parallelize=True,
+        affects_context=False,
+    ),
+    ToolSpec(
+        name="grep_text",
+        summary_line="- grep_text(pattern, path='.', limit=50): 搜索文本",
+        schema=_build_function_schema(
+            "grep_text",
+            "在工作区内搜索文本，返回 file:line 片段。",
+            properties={
+                "pattern": {
+                    "type": "string",
+                    "description": "Python 正则表达式",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "待搜索的目录或文件，默认整个工作区",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "最多返回多少条匹配，默认 50",
+                },
+            },
+            required=("pattern",),
+        ),
+        category="discovery",
+        read_only=True,
+        mutates_workspace=False,
+        needs_approval=False,
+        can_parallelize=True,
+        affects_context=False,
+    ),
+    ToolSpec(
+        name="run_command",
+        summary_line="- run_command(cmd): 在工作区根目录执行 shell，执行前会请求确认",
+        schema=_build_function_schema(
+            "run_command",
+            "在工作区根目录执行 shell 命令，返回 stdout/stderr。执行前通常会询问用户确认。",
+            properties={
+                "cmd": {
+                    "type": "string",
+                    "description": "完整 shell 命令",
+                },
+            },
+            required=("cmd",),
+        ),
+        category="command",
+        read_only=False,
+        mutates_workspace=True,
+        needs_approval=True,
+        can_parallelize=False,
+        affects_context=True,
+    ),
+)
+TOOL_SPEC_MAP = {spec.name: spec for spec in TOOL_REGISTRY}
+DEFAULT_TOOL_NAMES = tuple(spec.name for spec in TOOL_REGISTRY)
+READ_ONLY_TOOL_NAMES = tuple(spec.name for spec in TOOL_REGISTRY if spec.read_only)
 
 
 def _truncate(text: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:
@@ -279,174 +524,21 @@ class ToolRuntime:
 
     def __post_init__(self) -> None:
         self.workspace_root = self.workspace_root.expanduser().resolve()
-        schemas = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "read_file",
-                    "description": "读取工作区内文本文件内容。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "文件路径"}
-                        },
-                        "required": ["path"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "write_file",
-                    "description": "写入文本文件，覆盖已有内容。适合创建新文件或整文件重写。执行前通常会询问用户确认。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "文件路径"},
-                            "content": {
-                                "type": "string",
-                                "description": "要写入的完整内容",
-                            },
-                        },
-                        "required": ["path", "content"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "edit_file",
-                    "description": "按精确文本片段编辑文件。适合局部修改，不用整文件重写。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "文件路径"},
-                            "old_text": {
-                                "type": "string",
-                                "description": "要替换的原始文本片段，必须与文件内容完全匹配",
-                            },
-                            "new_text": {
-                                "type": "string",
-                                "description": "替换后的文本片段",
-                            },
-                            "replace_all": {
-                                "type": "boolean",
-                                "description": "是否替换全部匹配项，默认 false",
-                            },
-                        },
-                        "required": ["path", "old_text", "new_text"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "apply_patch",
-                    "description": "对同一个文件按顺序应用多个精确文本替换。适合一次完成多处局部修改。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "文件路径"},
-                            "edits": {
-                                "type": "array",
-                                "description": "按顺序应用的编辑列表",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "old_text": {
-                                            "type": "string",
-                                            "description": "要替换的原始文本片段",
-                                        },
-                                        "new_text": {
-                                            "type": "string",
-                                            "description": "替换后的文本片段",
-                                        },
-                                        "replace_all": {
-                                            "type": "boolean",
-                                            "description": "是否替换全部匹配项，默认 false",
-                                        },
-                                    },
-                                    "required": ["old_text", "new_text"],
-                                },
-                            },
-                        },
-                        "required": ["path", "edits"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_files",
-                    "description": "列出工作区内的文件或目录，适合做轻量探索。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "起始目录或文件，默认当前工作区根目录",
-                            },
-                            "glob": {
-                                "type": "string",
-                                "description": "glob 模式，例如 **/*.py",
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "最多返回多少项，默认 200",
-                            },
-                        },
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "grep_text",
-                    "description": "在工作区内搜索文本，返回 file:line 片段。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "pattern": {
-                                "type": "string",
-                                "description": "Python 正则表达式",
-                            },
-                            "path": {
-                                "type": "string",
-                                "description": "待搜索的目录或文件，默认整个工作区",
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "最多返回多少条匹配，默认 50",
-                            },
-                        },
-                        "required": ["pattern"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "run_command",
-                    "description": (
-                        "在工作区根目录执行 shell 命令，返回 stdout/stderr。"
-                        "执行前通常会询问用户确认。"
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "cmd": {"type": "string", "description": "完整 shell 命令"}
-                        },
-                        "required": ["cmd"],
-                    },
-                },
-            },
-        ]
-        self._tool_schema_map = {
-            schema["function"]["name"]: schema for schema in schemas
+        self._tool_specs_by_name = TOOL_SPEC_MAP
+        self._tool_handlers = {
+            "read_file": self.read_file,
+            "write_file": self.write_file,
+            "edit_file": self.edit_file,
+            "apply_patch": self.apply_patch,
+            "list_files": self.list_files,
+            "grep_text": self.grep_text,
+            "run_command": self.run_command,
         }
         self.active_tool_profile = "full"
-        self.active_tool_names = tuple(self._tool_schema_map.keys())
-        self.tool_schemas = list(self._tool_schema_map.values())
+        self.active_tool_names: tuple[str, ...] = ()
+        self.active_tool_specs: tuple[ToolSpec, ...] = ()
+        self.tool_schemas: list[dict[str, object]] = []
+        self.set_tool_profile("full")
 
     def set_tool_profile(self, profile: str) -> None:
         if profile == "read_only":
@@ -455,15 +547,16 @@ class ToolRuntime:
             tool_names = ()
         else:
             profile = "full"
-            tool_names = tuple(self._tool_schema_map.keys())
+            tool_names = DEFAULT_TOOL_NAMES
 
         self.active_tool_profile = profile
-        self.active_tool_names = tuple(
-            name for name in tool_names if name in self._tool_schema_map
+        self.active_tool_specs = tuple(
+            self._tool_specs_by_name[name]
+            for name in tool_names
+            if name in self._tool_specs_by_name
         )
-        self.tool_schemas = [
-            self._tool_schema_map[name] for name in self.active_tool_names
-        ]
+        self.active_tool_names = tuple(spec.name for spec in self.active_tool_specs)
+        self.tool_schemas = [spec.schema for spec in self.active_tool_specs]
 
     def update_tool_profile_for_task(
         self,
@@ -485,10 +578,59 @@ class ToolRuntime:
 
     def tool_summary(self) -> str:
         return "\n".join(
-            TOOL_SUMMARY_LINES[name]
-            for name in self.active_tool_names
-            if name in TOOL_SUMMARY_LINES
+            spec.summary_line for spec in self.active_tool_specs
         )
+
+    def scheduler_snapshot(self) -> ToolSchedulerSnapshot:
+        active = self.active_tool_specs
+        return ToolSchedulerSnapshot(
+            profile=self.active_tool_profile,
+            active_tools=tuple(spec.name for spec in active),
+            read_only_tools=tuple(spec.name for spec in active if spec.read_only),
+            mutating_tools=tuple(
+                spec.name for spec in active if spec.mutates_workspace
+            ),
+            approval_tools=tuple(spec.name for spec in active if spec.needs_approval),
+            parallel_tools=tuple(spec.name for spec in active if spec.can_parallelize),
+            context_tools=tuple(spec.name for spec in active if spec.affects_context),
+        )
+
+    def scheduler_brief(self) -> str:
+        snapshot = self.scheduler_snapshot()
+        return (
+            f"active={len(snapshot.active_tools)} "
+            f"read_only={len(snapshot.read_only_tools)} "
+            f"mutating={len(snapshot.mutating_tools)} "
+            f"approval={len(snapshot.approval_tools)} "
+            f"parallel={len(snapshot.parallel_tools)} "
+            f"context={len(snapshot.context_tools)}"
+        )
+
+    def scheduler_summary(self) -> str:
+        snapshot = self.scheduler_snapshot()
+        lines = [
+            f"tool profile: {snapshot.profile}",
+            f"- active: {_tool_list_label(snapshot.active_tools)}",
+            f"- read_only: {_tool_list_label(snapshot.read_only_tools)}",
+            f"- mutating: {_tool_list_label(snapshot.mutating_tools)}",
+            f"- needs_approval: {_tool_list_label(snapshot.approval_tools)}",
+            f"- parallel_candidates: {_tool_list_label(snapshot.parallel_tools)}",
+            f"- affects_context: {_tool_list_label(snapshot.context_tools)}",
+        ]
+        return "\n".join(lines)
+
+    def tool_catalog_report(self) -> str:
+        lines = ["工具目录", "", self.scheduler_summary(), "", "当前可用工具："]
+        if not self.active_tool_specs:
+            lines.append("(none)")
+            return "\n".join(lines)
+
+        for spec in self.active_tool_specs:
+            lines.append(spec.summary_line)
+            lines.append(
+                f"  meta: category={spec.category}; {spec.scheduler_flags()}"
+            )
+        return "\n".join(lines)
 
     def _resolve_path(self, path: str, *, allow_missing: bool = False) -> Path:
         candidate = Path(path).expanduser()
@@ -1250,18 +1392,10 @@ class ToolRuntime:
         return _truncate(combined)
 
     def execute_tool(self, name: str, args: dict) -> str:
-        if name == "read_file":
-            return self.read_file(**args)
-        if name == "write_file":
-            return self.write_file(**args)
-        if name == "edit_file":
-            return self.edit_file(**args)
-        if name == "apply_patch":
-            return self.apply_patch(**args)
-        if name == "list_files":
-            return self.list_files(**args)
-        if name == "grep_text":
-            return self.grep_text(**args)
-        if name == "run_command":
-            return self.run_command(**args)
-        return f"ERROR: 未知工具 {name}"
+        handler = self._tool_handlers.get(name)
+        if handler is None:
+            return f"ERROR: 未知工具 {name}"
+        try:
+            return handler(**args)
+        except TypeError as exc:
+            return f"ERROR: 工具参数不合法 {name}: {exc}"
