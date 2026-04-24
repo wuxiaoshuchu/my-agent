@@ -58,6 +58,12 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             long_timeout_s=120,
             results=[
                 DiagnosticCaseResult("api_version", "ok", 10, "HTTP request completed"),
+                DiagnosticCaseResult(
+                    "agent_payload_profile",
+                    "ok",
+                    0,
+                    "turn=1 messages=2 non_system=1 est_tokens=100 system_chars=5000 memory_chars=0 tools=on (7 tools / 2500 chars)",
+                ),
                 DiagnosticCaseResult("agent_runtime_defaults_short", "timeout", 20000, "timeout"),
             ],
         )
@@ -67,6 +73,7 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
 
         self.assertIn("# runtime diagnostics: qwen2.5-coder:7b", markdown)
         self.assertIn("## Root Cause", markdown)
+        self.assertIn("agent_payload_profile", markdown)
         self.assertEqual(summary["timeout_cases"], 1)
 
     def test_infer_root_cause_detects_large_model_overload_pattern(self):

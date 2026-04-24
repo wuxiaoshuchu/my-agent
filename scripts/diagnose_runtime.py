@@ -21,6 +21,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from openai import OpenAI
 
 from agent import AgentSession, build_config, build_system_prompt, parse_args
+from performance_trace import (
+    build_request_payload_profile,
+    render_payload_profile,
+    summarize_payload_profile,
+)
 from runtime_diagnostics import (
     DiagnosticCaseResult,
     DiagnosticRun,
@@ -278,6 +283,14 @@ def main(argv: list[str] | None = None) -> int:
     runtime_prompt = (
         "读取 jarvis.config.json，告诉我默认 model、base_url 和 num_ctx。请尽量简短，并保留原值。"
     )
+    agent_payload_profile = build_request_payload_profile(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": runtime_prompt},
+        ],
+        runtime.tool_schemas,
+        turn=1,
+    )
 
     results = [
         run_subprocess_case("ollama_ps_before", ["ollama", "ps"]),
@@ -333,6 +346,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"content={response.choices[0].message.content!r}; tool_calls={bool(response.choices[0].message.tool_calls)}",
                 pretty_json(response.model_dump()),
             ),
+        ),
+        DiagnosticCaseResult(
+            case_id="agent_payload_profile",
+            status="ok",
+            duration_ms=0,
+            summary=summarize_payload_profile(agent_payload_profile),
+            detail=render_payload_profile(agent_payload_profile),
         ),
         run_agent_case(
             case_id="agent_runtime_defaults_short",

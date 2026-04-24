@@ -14,6 +14,7 @@
 - 增加了 `/status` `/branch` `/diff` `/history`，终于能看见自己做了什么
 - 增加了 `/summary` 和 `/commit`，可以回看本轮成果并直接提交
 - 增加了最小 `context engine`：会估算消息/tokens，并支持 `session memory + /compact`
+- 增加了 `/perf` 和模型请求追踪，可以看到当前请求载荷、tools schema 体积和最近几轮模型请求耗时
 - 仓库现在有 [HARNESS.md](HARNESS.md) 和 [CHANGELOG.md](CHANGELOG.md)，方便 agent 继承规则和回看成长史
 - 仓库现在还有 [way-to-claw-code.md](way-to-claw-code.md)，用于记录长期路线图和后续待办
 - 仓库现在还有 [jarvis.config.json](jarvis.config.json) 和 [model-baseline.md](model-baseline.md)，用于固定默认模型和记录本机模型基线
@@ -129,6 +130,7 @@ python agent.py
 /pwd    显示当前工作区根目录
 /model  查看或切换模型配置
 /compact 压缩较早会话历史
+/perf [N] 查看当前请求载荷和最近模型请求
 /status 查看当前 Git 状态
 /branch 查看当前分支
 /diff   查看当前 diff
@@ -165,6 +167,15 @@ python agent.py
 - 重新把 `HARNESS.md`、`way-to-claw-code.md` 和 compact 后的记忆一起注入 system prompt
 - 会尽量过滤掉 fake tool call JSON 这类容易污染后续模型行为的摘要内容
 - 如果用户只说“继续 / continue”这类低信息 follow-up，会沿用原任务主线，而不是把 active goal 覆盖成“继续”
+
+`/perf` 则更偏向这一轮开始补的性能观测：
+
+- 显示当前这次模型请求会携带多少消息、估算 token、system prompt 字符数
+- 显示 `session memory` 当前占了多少字符
+- 显示 tools schema 是否启用，以及 schema 大小大约多少字符
+- 回看最近几轮模型请求的耗时、tool call 数和内容长度
+
+这对定位“到底慢在模型本身，还是 prompt / tools 载荷过大”很有帮助。
 
 ## VS Code 里启动
 
@@ -434,6 +445,7 @@ python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b
 - 最小直连 chat
 - 最小 OpenAI 兼容 chat
 - `jarvis` 风格的 quick prompt
+- `agent_payload_profile`：同一轮 agent 请求的 messages / tools 载荷画像
 - 同一个真实 agent 任务在短超时和长超时下的表现
 
 结果会写到 `diagnostic-results/`，方便以后回看“到底是运行时坏了，还是模型太慢，还是 agent prompt/tool 形态触发了延迟”。
@@ -442,3 +454,14 @@ python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b
 
 - [diagnostic-results/2026-04-24_001108_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_001108_qwen2-5-coder-7b.md)
 - [diagnostic-results/2026-04-24_010457_qwen2-5-coder-14b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_010457_qwen2-5-coder-14b.md)
+- [diagnostic-results/2026-04-24_104656_qwen2-5-coder-7b.md](/Users/wuxiaoshuchu/Desktop/my-agent/diagnostic-results/2026-04-24_104656_qwen2-5-coder-7b.md)
+
+这轮新增的 payload 画像也给了我们一个更具体的基线：
+
+- `agent_payload_profile`：`messages=2`、`est_tokens=1375`、`system_chars=5147`
+- `tools schema`：`7` 个工具、约 `2516` 字符
+- 同一轮真实 agent 任务在长超时下：
+  - turn 1 规划 + 首次工具调用前大约 `45.6s`
+  - turn 2 读完文件后的最终回答大约 `23.5s`
+
+所以现在可以更确定地说：这台机器上的瓶颈确实集中在 `jarvis` 风格 prompt + tools 的首轮规划，不是单纯 `Ollama` 服务挂了。

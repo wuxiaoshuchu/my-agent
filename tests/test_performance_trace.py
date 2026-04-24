@@ -1,0 +1,71 @@
+import sys
+import unittest
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from performance_trace import (
+    ModelRequestTrace,
+    build_request_payload_profile,
+    render_payload_profile,
+    summarize_payload_profile,
+    summarize_request_trace,
+)
+
+
+class PerformanceTraceTests(unittest.TestCase):
+    def test_build_request_payload_profile_counts_system_and_tools(self):
+        profile = build_request_payload_profile(
+            [
+                {"role": "system", "content": "rules"},
+                {"role": "system", "content": "## Session Memory\n- 当前任务目标：读取配置"},
+                {"role": "user", "content": "读取 jarvis.config.json"},
+            ],
+            [
+                {
+                    "type": "function",
+                    "function": {"name": "read_file", "description": "读取文件"},
+                }
+            ],
+            turn=1,
+        )
+
+        self.assertEqual(profile.turn, 1)
+        self.assertEqual(profile.total_messages, 3)
+        self.assertEqual(profile.non_system_messages, 1)
+        self.assertTrue(profile.tools_enabled)
+        self.assertGreater(profile.system_message_chars, 0)
+        self.assertGreater(profile.session_memory_chars, 0)
+        self.assertGreater(profile.tool_schema_chars, 0)
+
+    def test_render_and_summaries_include_payload_details(self):
+        profile = build_request_payload_profile(
+            [{"role": "user", "content": "continue"}],
+            [],
+            turn=2,
+        )
+        trace = ModelRequestTrace(
+            turn=2,
+            status="timeout",
+            duration_ms=20000,
+            tool_calls=0,
+            content_chars=0,
+            payload=profile,
+            error="APITimeoutError: Request timed out.",
+        )
+
+        payload_summary = summarize_payload_profile(profile)
+        trace_summary = summarize_request_trace(trace)
+        rendered = render_payload_profile(profile)
+
+        self.assertIn("turn=2", payload_summary)
+        self.assertIn("tools=off", payload_summary)
+        self.assertIn("timeout 20000ms", trace_summary)
+        self.assertIn("APITimeoutError", trace_summary)
+        self.assertIn("- tools_enabled: no", rendered)
+
+
+if __name__ == "__main__":
+    unittest.main()

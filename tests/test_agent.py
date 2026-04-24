@@ -18,6 +18,7 @@ from agent import (
     resolve_active_goal,
 )
 from context_engine import SessionMemory
+from performance_trace import ModelRequestTrace, RequestPayloadProfile
 from runtime_config import RuntimeConfigSources
 from tools import ToolRuntime
 
@@ -195,6 +196,7 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
         session.tool_names = set()
         session.messages = [{"role": "user", "content": "hello"}]
         session.activity_log = []
+        session.request_traces = []
         session.maybe_auto_compact = lambda: None
         session.log_activity = lambda *args, **kwargs: None
 
@@ -204,6 +206,44 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
         call = session.client.chat.completions.calls[0]
         self.assertNotIn("tools", call)
         self.assertNotIn("tool_choice", call)
+        self.assertEqual(len(session.request_traces), 1)
+        self.assertEqual(session.request_traces[0].status, "ok")
+        self.assertFalse(session.request_traces[0].payload.tools_enabled)
+
+    def test_performance_report_includes_current_payload_and_recent_requests(self):
+        session = object.__new__(AgentSession)
+        session.messages = [
+            {"role": "system", "content": "rules"},
+            {"role": "user", "content": "hello"},
+        ]
+        session.runtime = type("Runtime", (), {"tool_schemas": []})()
+        session.request_traces = [
+            ModelRequestTrace(
+                turn=1,
+                status="ok",
+                duration_ms=3210,
+                tool_calls=0,
+                content_chars=5,
+                payload=RequestPayloadProfile(
+                    turn=1,
+                    total_messages=2,
+                    non_system_messages=1,
+                    estimated_tokens=42,
+                    system_message_chars=5,
+                    session_memory_chars=0,
+                    tool_schema_count=0,
+                    tool_schema_chars=2,
+                    tools_enabled=False,
+                ),
+            )
+        ]
+
+        report = AgentSession.performance_report(session, limit=3)
+
+        self.assertIn("性能观察", report)
+        self.assertIn("当前请求载荷", report)
+        self.assertIn("最近模型请求", report)
+        self.assertIn("3210ms", report)
 
 
 if __name__ == "__main__":

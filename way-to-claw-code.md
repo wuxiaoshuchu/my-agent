@@ -20,6 +20,7 @@
 - 最小 `context engine`：message/token 估算、`session memory`、自动 compact 和 `/compact`
 - `P1` 现在还有 deterministic context regression harness，可以回归 compact / active goal / fake tool call
 - `P1` 现在还有 live context regression harness，可以在真实模型上回归 compact / active goal / full-stack tool use
+- `P4` 现在起步有了请求级性能观察：`/perf`、request payload profile、diagnostics 里的 `agent_payload_profile`
 
 但和 `claw-code` / `Codex` 这类成熟 agent 仍有明显差距，主要缺口不是单个功能，而是系统层：
 
@@ -28,6 +29,7 @@
 - 恢复能力：还没有 retry / fallback / 中断恢复 / 长任务继续
 - 权限系统：还没有 prefix rules / 持久规则 / 更细粒度审批
 - 可观测性：还没有 profiling / cost / tool duration / eval
+  - 现在已经起步补上了模型请求层的 payload / duration 观察，但工具耗时和更完整 eval 还没接进来
 - 多 agent：还没有 worktree / delegation / 背景任务
 
 ## 北极星
@@ -92,6 +94,12 @@
   - 最小直连和最小 OpenAI 兼容请求都能秒级返回
   - 慢点主要出现在 `qwen2.5-coder:7b` 处理真实 agent 任务时的首轮工具规划
   - 同一个任务在 `120s` 超时下可以完成，说明更像“太慢”而不是“完全坏了”
+  - 新增的 `agent_payload_profile` 也已经把当前请求画像固定下来了：
+    - `messages=2`
+    - `est_tokens=1375`
+    - `system_chars=5147`
+    - `tool_schema_chars=2516`
+  - 最新 long-timeout 诊断里，同一轮真实 agent 任务的 turn 1 / turn 2 大约分别是 `45.6s / 23.5s`
 - `qwen2.5-coder:14b` 这轮也已经补了真实对比：
   - benchmark 仍然是 `0/4`
   - 最小直连 `api/chat` 在 warm/cold 状态下波动很大，大约 `3.9s - 40.7s`
@@ -205,11 +213,13 @@
 
 ### 待办
 
-- [ ] 为模型调用记录：
+- [x] 为模型调用记录：
   - 轮数
   - 工具数
   - 总耗时
-  - 失败/重试次数
+  - timeout / error
+- [x] 给 REPL 增加最小 `/perf` 命令，直接看当前请求载荷和最近模型请求轨迹
+- [x] 把 `agent_payload_profile` 接进 runtime diagnostics，记录同一轮 agent 请求的 payload 画像
 - [ ] 为工具调用记录：
   - 工具名
   - 耗时
@@ -226,6 +236,7 @@
 
 - 架构改动后有办法判断是更好还是更差
 - 至少有一个轻量 benchmark 能比较模型和 agent 版本
+- 至少能快速看见“这一轮模型请求到底带了多少上下文、多少 tools、花了多久”
 
 ## P5 Background Work + Multi-Agent
 

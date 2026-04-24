@@ -19,6 +19,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 
 from context_engine import (
     SessionMemory,
@@ -27,6 +28,12 @@ from context_engine import (
     conversation_messages,
     render_session_memory,
     should_auto_compact,
+)
+from performance_trace import (
+    ModelRequestTrace,
+    build_request_payload_profile,
+    render_payload_profile,
+    summarize_request_trace,
 )
 from runtime_config import (
     CONFIG_FILENAME,
@@ -383,6 +390,7 @@ class AgentSession:
     def reset(self) -> None:
         self.memory = SessionMemory()
         self.activity_log.clear()
+        self.request_traces: list[ModelRequestTrace] = []
         self.rebuild_messages([])
         self.log_activity("system", "会话已初始化")
 
@@ -470,6 +478,7 @@ class AgentSession:
 
     def summary_report(self, limit: int = 8) -> str:
         lines = ["本轮摘要"]
+        request_traces = getattr(self, "request_traces", [])
 
         entries = self.activity_log[-limit:]
         if entries:
@@ -503,6 +512,39 @@ class AgentSession:
         lines.append("Context：")
         lines.append(self.context_report())
 
+        if request_traces:
+            lines.append("")
+            lines.append("Model 请求：")
+            lines.extend(
+                f"- {summarize_request_trace(trace)}"
+                for trace in request_traces[-min(limit, 3) :]
+            )
+
+        return "\n".join(lines)
+
+    def performance_report(self, limit: int = 5) -> str:
+        request_traces = getattr(self, "request_traces", [])
+        current_payload = build_request_payload_profile(
+            self.messages,
+            self.runtime.tool_schemas,
+            turn=len(request_traces) + 1,
+        )
+        lines = [
+            "性能观察",
+            "",
+            "当前请求载荷：",
+            render_payload_profile(current_payload),
+            "",
+            "最近模型请求：",
+        ]
+        if not request_traces:
+            lines.append("- 还没有模型请求。")
+            return "\n".join(lines)
+
+        lines.extend(
+            f"- {summarize_request_trace(trace)}"
+            for trace in request_traces[-limit:]
+        )
         return "\n".join(lines)
 
     def render_repl_header(self) -> str:
@@ -514,7 +556,7 @@ class AgentSession:
             style_text(f"workspace: {self.config.workspace_root}", color="bold", use_color=use_color),
             f"model: {self.config.model} | approval: {'auto' if self.runtime.auto_approve else 'ask'}",
             format_git_summary(snapshot),
-            "commands: /help /model /compact /patch /summary /status /diff /commit /quit",
+            "commands: /help /model /compact /perf /patch /summary /status /diff /commit /quit",
         ]
         return "\n".join(lines)
 
@@ -647,6 +689,24 @@ class AgentSession:
         for turn in range(1, self.config.max_turns + 1):
             print(f"\n--- turn {turn} ---")
             self.maybe_auto_compact()
+            payload_profile = build_request_payload_profile(
+                self.messages,
+                self.runtime.tool_schemas,
+                turn=turn,
+            )
+            self.log_activity(
+                "model_request",
+                summarize_request_trace(
+                    ModelRequestTrace(
+                        turn=turn,
+                        status="pending",
+                        duration_ms=0,
+                        tool_calls=0,
+                        content_chars=0,
+                        payload=payload_profile,
+                    )
+                ),
+            )
 
             request_kwargs = dict(
                 model=self.config.model,
@@ -657,7 +717,24 @@ class AgentSession:
                 request_kwargs["tools"] = self.runtime.tool_schemas
                 request_kwargs["tool_choice"] = "auto"
 
-            response = self.client.chat.completions.create(**request_kwargs)
+            start = perf_counter()
+            try:
+                response = self.client.chat.completions.create(**request_kwargs)
+            except Exception as exc:
+                duration_ms = int((perf_counter() - start) * 1000)
+                status = "timeout" if type(exc).__name__ == "APITimeoutError" else "error"
+                trace = ModelRequestTrace(
+                    turn=turn,
+                    status=status,
+                    duration_ms=duration_ms,
+                    tool_calls=0,
+                    content_chars=0,
+                    payload=payload_profile,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                self.request_traces.append(trace)
+                self.log_activity("model_error", summarize_request_trace(trace))
+                raise
             msg = response.choices[0].message
 
             tool_calls = []
@@ -712,6 +789,16 @@ class AgentSession:
                 if not msg.tool_calls:
                     assistant_msg["content"] = ""
             self.messages.append(assistant_msg)
+            trace = ModelRequestTrace(
+                turn=turn,
+                status="ok",
+                duration_ms=int((perf_counter() - start) * 1000),
+                tool_calls=len(tool_calls),
+                content_chars=len(msg.content or ""),
+                payload=payload_profile,
+            )
+            self.request_traces.append(trace)
+            self.log_activity("model_response", summarize_request_trace(trace))
 
             if msg.content and not (tool_calls and not msg.tool_calls):
                 print(f"[assistant] {msg.content}")
@@ -769,6 +856,7 @@ class AgentSession:
                         "  /pwd    显示工作区根目录",
                         "  /model  查看或切换模型配置",
                         "  /compact 压缩较早会话历史",
+                        "  /perf [N] 查看当前请求载荷和最近模型请求",
                         "  /status 查看当前 Git 状态",
                         "  /branch 查看当前分支",
                         "  /diff [--stat|path] 查看改动",
@@ -829,6 +917,17 @@ class AgentSession:
 
         if command == "/compact":
             print(self.compact_history(reason="manual"))
+            return True
+
+        if command == "/perf":
+            limit = 5
+            if args:
+                try:
+                    limit = max(1, int(args[0]))
+                except ValueError:
+                    print("用法: /perf [N]")
+                    return True
+            print(_truncate_cli_output(self.performance_report(limit=limit)))
             return True
 
         if command == "/status":

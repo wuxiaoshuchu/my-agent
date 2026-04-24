@@ -4,6 +4,37 @@
 
 ## 2026-04-24
 
+### 给 jarvis 增加请求级性能观察，并把 payload profile 接进 diagnostics
+
+- 新增 [performance_trace.py](performance_trace.py)，把模型请求载荷画像和请求耗时轨迹抽成独立模块。
+- 更新 [agent.py](agent.py)，现在每轮模型请求都会记录：
+  - 当前消息数 / 估算 tokens
+  - system prompt 和 session memory 的字符量
+  - tools schema 是否启用，以及 schema 大小
+  - 请求耗时、tool call 数、输出长度、timeout/error
+- REPL 新增 `/perf [N]`，可以直接看当前请求载荷和最近几轮模型请求轨迹。
+- 更新 [scripts/diagnose_runtime.py](scripts/diagnose_runtime.py)，让 runtime diagnostics 报告里新增 `agent_payload_profile`，把同一轮 agent 请求的 messages/tools 载荷写进报告。
+- 新增 [tests/test_performance_trace.py](tests/test_performance_trace.py)，并补充 [tests/test_agent.py](tests/test_agent.py)、[tests/test_runtime_diagnostics.py](tests/test_runtime_diagnostics.py)。
+- 更新 [README.md](README.md)、[way-to-claw-code.md](way-to-claw-code.md)、[setup.cfg](setup.cfg)，把这一轮性能观察能力写回仓库。
+- 加入一份新的 runtime diagnostics 结果到 [diagnostic-results/](diagnostic-results/)：
+  - [diagnostic-results/2026-04-24_104656_qwen2-5-coder-7b.md](diagnostic-results/2026-04-24_104656_qwen2-5-coder-7b.md)
+  - 现在能看见 `agent_payload_profile`：`est_tokens=1375`、`system_chars=5147`、`tool_schema_chars=2516`
+  - 同一轮长超时任务里，turn 1 约 `45.6s`，turn 2 约 `23.5s`
+
+### 为什么这样改
+
+- 前一轮我们已经知道：`goal-only` live case 能过，但单条也要接近 `100s`；`full-stack` case 仍然会在 `120s` 左右超时。
+- 这时继续盲猜“是不是模型慢”已经不够了，得先把每轮请求到底带了多少上下文、多少 tools、花了多久变成正式观测。
+- 这一轮做的不是最终优化，而是把后面的性能优化和架构优化变成“可测、可比、可回看”的事情，这也是往 `P4 Observability` 走的第一步。
+- 新的诊断结果也把“问题具体卡在哪”说得更清楚了：这不是单纯服务不可用，而是 `jarvis` 风格 prompt + tools 的首轮规划成本明显高于最小请求。
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `python3 agent.py --help`
+- `printf '/perf\n/quit\n' | python3 agent.py --repl`
+- `python3 scripts/diagnose_runtime.py --model qwen2.5-coder:7b --output-dir diagnostic-results`
+
 ### 给 P1 增加 live context regression，并把 goal-only 与 full-stack case 分层
 
 - 新增 [context_live_regression.py](context_live_regression.py)，把 live model 的 `compact / active goal / tool use` 回归运行、评估与报告逻辑抽成独立模块。
