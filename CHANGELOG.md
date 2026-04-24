@@ -4,6 +4,39 @@
 
 ## 2026-04-24
 
+### 给 P2 加上只读工具 batch 入口和调度批次 trace
+
+- 更新 [tool_runtime.py](tool_runtime.py)，新增：
+  - `execute_tool_batch(tool_calls)`
+  - `describe_tool_batch(tool_calls)`
+  - `scheduler_traces`
+- 现在如果一轮模型回复里给出多个工具调用，runtime 会先判定这批工具的调度模式：
+  - 多个只读工具：`read_only_batch`
+  - 混合或写工具：`serial`
+- 这一版 `read_only_batch` 还不是“真正并发执行”，但已经有了正式的 batch 入口和批次 trace。
+- 更新 [performance_trace.py](performance_trace.py)，新增 `ToolBatchTrace` 和 `summarize_tool_batch_trace()`。
+- 更新 [agent.py](agent.py)：
+  - 如果一轮里有多个工具调用，会先打印一条 `[scheduler] ...`
+  - `/perf` 现在会显示“最近调度批次”
+- 补充 [tests/test_tools.py](tests/test_tools.py)、[tests/test_agent.py](tests/test_agent.py)、[tests/test_performance_trace.py](tests/test_performance_trace.py)，覆盖只读 batch、serial batch、批次摘要和 agent 走 batch 执行入口。
+
+### 为什么这样改
+
+- 上一轮我们已经有了工具 trace，但 scheduler 还只是“每个工具各跑各的”。
+- 如果后面直接跳到真并发，中间没有批次入口和批次 trace，问题会很难定位。
+- 这轮先把“batch 作为一个正式概念”引进来，等于是把 scheduler 从静态元数据再推进到动态执行层。
+- 现在我们已经能回答这类问题：
+  - 这一轮是不是走了只读批次？
+  - 这批工具总共跑了多久？
+  - 这批输出有多大？
+  - 这一批里有没有 error / denied？
+
+### 验证
+
+- `python3 -m unittest discover -s tests`
+- `python3 - <<'PY' ... ToolRuntime.execute_tool_batch(...) ... PY`
+- `printf '/perf\n/quit\n' | python3 agent.py --repl`
+
 ### 给 P2 补上工具执行观测，把耗时和输出大小接进 /perf
 
 - 更新 [tool_runtime.py](tool_runtime.py)，现在 `ToolRuntime.execute_tool()` 会记录每次工具执行的 trace：

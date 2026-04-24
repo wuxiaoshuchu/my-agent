@@ -261,6 +261,79 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
         self.assertEqual(session.request_traces[0].status, "ok")
         self.assertFalse(session.request_traces[0].payload.tools_enabled)
 
+    def test_run_until_idle_uses_tool_batch_executor_when_available(self):
+        class FakeFunction:
+            def __init__(self, name: str, arguments: str):
+                self.name = name
+                self.arguments = arguments
+
+        class FakeToolCall:
+            def __init__(self, call_id: str, name: str, arguments: str):
+                self.id = call_id
+                self.function = FakeFunction(name, arguments)
+
+        class FakeMessage:
+            content = ""
+            tool_calls = [
+                FakeToolCall("call_1", "read_file", '{"path":"README.md"}'),
+                FakeToolCall("call_2", "grep_text", '{"pattern":"TODO"}'),
+            ]
+
+        class FakeChoice:
+            message = FakeMessage()
+
+        class FakeResponse:
+            choices = [FakeChoice()]
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                return FakeResponse()
+
+        class FakeChat:
+            def __init__(self):
+                self.completions = FakeCompletions()
+
+        class FakeClient:
+            def __init__(self):
+                self.chat = FakeChat()
+
+        class FakeRuntime:
+            tool_schemas = [{"type": "function", "function": {"name": "read_file"}}]
+            active_tool_profile = "read_only"
+            tool_traces = []
+            scheduler_traces = []
+
+            def __init__(self):
+                self.batch_calls = []
+
+            def scheduler_brief(self):
+                return "active=2 read_only=2 mutating=0 approval=0 parallel=2 context=0"
+
+            def execute_tool_batch(self, tool_calls):
+                self.batch_calls.append(tool_calls)
+                return ["[file] README.md\nhello", "README.md:1: TODO"]
+
+        session = object.__new__(AgentSession)
+        session.config = type(
+            "Config",
+            (),
+            {"max_turns": 1, "model": "demo", "num_ctx": 2048},
+        )()
+        session.client = FakeClient()
+        session.runtime = FakeRuntime()
+        session.tool_names = {"read_file", "grep_text"}
+        session.messages = [{"role": "user", "content": "hello"}]
+        session.activity_log = []
+        session.request_traces = []
+        session.maybe_auto_compact = lambda: None
+        session.log_activity = lambda *args, **kwargs: None
+
+        finished = AgentSession.run_until_idle(session)
+
+        self.assertFalse(finished)
+        self.assertEqual(len(session.runtime.batch_calls), 1)
+        self.assertEqual(len(session.runtime.batch_calls[0]), 2)
+
     def test_performance_report_includes_current_payload_and_recent_requests(self):
         session = object.__new__(AgentSession)
         session.messages = [
@@ -285,6 +358,23 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
                             "output_chars": 128,
                             "read_only": True,
                             "needs_approval": False,
+                        },
+                    )()
+                ],
+                "scheduler_traces": [
+                    type(
+                        "BatchTrace",
+                        (),
+                        {
+                            "mode": "read_only_batch",
+                            "tool_names": ("read_file", "grep_text"),
+                            "tool_count": 2,
+                            "read_only_count": 2,
+                            "mutating_count": 0,
+                            "duration_ms": 88,
+                            "total_output_chars": 256,
+                            "error_count": 0,
+                            "denied_count": 0,
                         },
                     )()
                 ],
@@ -322,7 +412,9 @@ class ExtractFakeToolCallsTests(unittest.TestCase):
         self.assertIn("当前请求载荷", report)
         self.assertIn("最近模型请求", report)
         self.assertIn("最近工具执行", report)
+        self.assertIn("最近调度批次", report)
         self.assertIn("read_file [filesystem] ok 45ms", report)
+        self.assertIn("read_only_batch tools=2", report)
         self.assertIn("3210ms", report)
 
     def test_add_user_message_switches_to_read_only_tool_profile(self):

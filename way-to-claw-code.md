@@ -192,8 +192,10 @@
   - `tool_runtime.py` 负责文件工具、命令工具和 runtime 编排
   - `tools.py` 保留兼容 facade，避免上层大面积改 import
 - 当前工具画像还是基于 `full / read_only` 两档切换，但已经不再只是一些零散常量，而是开始长成真正的调度层
-- [ ] 实现只读工具批量并发
+- [~] 实现只读工具批量并发
   - 典型目标：`read_file` / `grep_text` / `list_files`
+  - 当前已完成第一层：`read_only_batch` 调度入口、批次摘要和批次 trace
+  - 当前仍是顺序执行，不是真正并发；下一步才是把这层切成真实并发执行
 - [ ] 保持写工具串行
   - `write_file` / `edit_file` / `apply_patch` / `run_command`
 - [x] 记录每个工具的耗时与结果大小

@@ -43,6 +43,19 @@ class ToolExecutionTrace:
     needs_approval: bool
 
 
+@dataclass(frozen=True)
+class ToolBatchTrace:
+    mode: str
+    tool_names: tuple[str, ...]
+    tool_count: int
+    read_only_count: int
+    mutating_count: int
+    duration_ms: int
+    total_output_chars: int
+    error_count: int
+    denied_count: int
+
+
 def build_request_payload_profile(
     messages: Sequence[dict[str, object]],
     tool_schemas: Sequence[dict[str, object]] | None,
@@ -104,6 +117,16 @@ def summarize_tool_trace(trace: ToolExecutionTrace) -> str:
     return (
         f"{trace.tool_name} [{trace.category}] {trace.status} {trace.duration_ms}ms "
         f"output_chars={trace.output_chars} {mode} {approval}"
+    )
+
+
+def summarize_tool_batch_trace(trace: ToolBatchTrace) -> str:
+    names = ", ".join(trace.tool_names)
+    return (
+        f"{trace.mode} tools={trace.tool_count} read_only={trace.read_only_count} "
+        f"mutating={trace.mutating_count} {trace.duration_ms}ms "
+        f"output_chars={trace.total_output_chars} errors={trace.error_count} "
+        f"denied={trace.denied_count} [{names}]"
     )
 
 

@@ -8,10 +8,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from performance_trace import (
     ModelRequestTrace,
+    ToolBatchTrace,
     ToolExecutionTrace,
     build_request_payload_profile,
     render_payload_profile,
     summarize_payload_profile,
+    summarize_tool_batch_trace,
     summarize_request_trace,
     summarize_tool_trace,
 )
@@ -88,6 +90,26 @@ class PerformanceTraceTests(unittest.TestCase):
         self.assertIn("output_chars=240", summary)
         self.assertIn("read-only", summary)
         self.assertIn("no-approval", summary)
+
+    def test_summarize_tool_batch_trace_includes_batch_shape(self):
+        trace = ToolBatchTrace(
+            mode="read_only_batch",
+            tool_names=("read_file", "grep_text"),
+            tool_count=2,
+            read_only_count=2,
+            mutating_count=0,
+            duration_ms=93,
+            total_output_chars=512,
+            error_count=0,
+            denied_count=0,
+        )
+
+        summary = summarize_tool_batch_trace(trace)
+
+        self.assertIn("read_only_batch", summary)
+        self.assertIn("tools=2", summary)
+        self.assertIn("output_chars=512", summary)
+        self.assertIn("[read_file, grep_text]", summary)
 
 
 if __name__ == "__main__":

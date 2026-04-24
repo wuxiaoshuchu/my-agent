@@ -11,7 +11,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING
 
-from performance_trace import ToolExecutionTrace
+from performance_trace import ToolBatchTrace, ToolExecutionTrace
 from tool_registry import (
     DEFAULT_TOOL_NAMES,
     READ_ONLY_TOOL_NAMES,
@@ -864,6 +864,7 @@ class ToolRuntime:
         self.active_tool_specs: tuple[ToolSpec, ...] = ()
         self.tool_schemas: list[dict[str, object]] = []
         self.tool_traces: list[ToolExecutionTrace] = []
+        self.scheduler_traces: list[ToolBatchTrace] = []
         self.set_tool_profile("full")
 
     def set_tool_profile(self, profile: str) -> None:
@@ -961,6 +962,13 @@ class ToolRuntime:
             for trace in self.tool_traces[-limit:]
         ]
 
+    def tool_batch_summary(self, limit: int = 5) -> list[str]:
+        return [
+            f"- {trace.mode} tools={trace.tool_count} {trace.duration_ms}ms "
+            f"output_chars={trace.total_output_chars}"
+            for trace in self.scheduler_traces[-limit:]
+        ]
+
     def _record_tool_trace(
         self,
         name: str,
@@ -979,6 +987,43 @@ class ToolRuntime:
                 output_chars=output_chars,
                 read_only=spec.read_only if spec else False,
                 needs_approval=spec.needs_approval if spec else False,
+            )
+        )
+
+    def _scheduler_mode_for_names(self, tool_names: tuple[str, ...]) -> str:
+        if len(tool_names) > 1 and all(
+            self._tool_specs_by_name.get(name) and self._tool_specs_by_name[name].read_only
+            for name in tool_names
+        ):
+            return "read_only_batch"
+        return "serial"
+
+    def describe_tool_batch(self, tool_calls: list[dict]) -> str:
+        tool_names = tuple(str(tool_call.get("name", "")) for tool_call in tool_calls)
+        mode = self._scheduler_mode_for_names(tool_names)
+        return f"{mode}: {tool_list_label(tool_names)}"
+
+    def _record_scheduler_trace(
+        self,
+        tool_names: tuple[str, ...],
+        *,
+        duration_ms: int,
+        results: list[str],
+    ) -> None:
+        specs = [self._tool_specs_by_name.get(name) for name in tool_names]
+        self.scheduler_traces.append(
+            ToolBatchTrace(
+                mode=self._scheduler_mode_for_names(tool_names),
+                tool_names=tool_names,
+                tool_count=len(tool_names),
+                read_only_count=sum(1 for spec in specs if spec and spec.read_only),
+                mutating_count=sum(
+                    1 for spec in specs if spec and spec.mutates_workspace
+                ),
+                duration_ms=duration_ms,
+                total_output_chars=sum(len(result) for result in results),
+                error_count=sum(1 for result in results if result.startswith("ERROR:")),
+                denied_count=sum(1 for result in results if result.startswith("DENIED:")),
             )
         )
 
@@ -1217,6 +1262,27 @@ class ToolRuntime:
             output_chars=len(result),
         )
         return result
+
+    def execute_tool_batch(self, tool_calls: list[dict]) -> list[str]:
+        if not tool_calls:
+            return []
+
+        tool_names = tuple(str(tool_call.get("name", "")) for tool_call in tool_calls)
+        start = perf_counter()
+        results = [
+            self.execute_tool(
+                str(tool_call.get("name", "")),
+                dict(tool_call.get("args", {})),
+            )
+            for tool_call in tool_calls
+        ]
+        duration_ms = int((perf_counter() - start) * 1000)
+        self._record_scheduler_trace(
+            tool_names,
+            duration_ms=duration_ms,
+            results=results,
+        )
+        return results
 
 
 __all__ = ["ToolRuntime", "infer_tool_profile"]

@@ -148,6 +148,44 @@ class ToolRuntimeTests(unittest.TestCase):
         self.assertEqual(trace.status, "denied")
         self.assertEqual(trace.category, "command")
 
+    def test_execute_tool_batch_records_read_only_batch_trace(self):
+        self.runtime.write_file("src/app.py", "print('hello')\n# TODO: fix\n")
+        self.runtime.tool_traces.clear()
+
+        results = self.runtime.execute_tool_batch(
+            [
+                {"name": "read_file", "args": {"path": "src/app.py"}},
+                {"name": "grep_text", "args": {"pattern": "TODO", "path": "src"}},
+            ]
+        )
+
+        self.assertEqual(len(results), 2)
+        batch = self.runtime.scheduler_traces[-1]
+        self.assertEqual(batch.mode, "read_only_batch")
+        self.assertEqual(batch.tool_names, ("read_file", "grep_text"))
+        self.assertEqual(batch.tool_count, 2)
+        self.assertEqual(batch.read_only_count, 2)
+        self.assertEqual(batch.mutating_count, 0)
+        self.assertEqual(batch.error_count, 0)
+        self.assertEqual(batch.denied_count, 0)
+
+    def test_execute_tool_batch_records_serial_when_mutating_tools_are_present(self):
+        self.runtime.tool_traces.clear()
+
+        results = self.runtime.execute_tool_batch(
+            [
+                {"name": "write_file", "args": {"path": "notes/demo.txt", "content": "hi"}},
+                {"name": "read_file", "args": {"path": "notes/demo.txt"}},
+            ]
+        )
+
+        self.assertEqual(len(results), 2)
+        batch = self.runtime.scheduler_traces[-1]
+        self.assertEqual(batch.mode, "serial")
+        self.assertEqual(batch.tool_count, 2)
+        self.assertEqual(batch.read_only_count, 1)
+        self.assertEqual(batch.mutating_count, 1)
+
     def test_edit_file_replaces_exact_snippet_and_returns_patch(self):
         self.runtime.write_file("src/app.py", "print('hello')\nprint('bye')\n")
         result = self.runtime.edit_file(

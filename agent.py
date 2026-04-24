@@ -32,6 +32,7 @@ from context_engine import (
 from performance_trace import (
     ModelRequestTrace,
     summarize_tool_trace,
+    summarize_tool_batch_trace,
     build_request_payload_profile,
     render_payload_profile,
     summarize_request_trace,
@@ -572,6 +573,7 @@ class AgentSession:
     def performance_report(self, limit: int = 5) -> str:
         request_traces = getattr(self, "request_traces", [])
         tool_traces = getattr(self.runtime, "tool_traces", [])
+        scheduler_traces = getattr(self.runtime, "scheduler_traces", [])
         current_payload = build_request_payload_profile(
             self.messages,
             self.runtime.tool_schemas,
@@ -605,6 +607,14 @@ class AgentSession:
             )
         else:
             lines.append("- 还没有工具执行。")
+        lines.extend(["", "最近调度批次："])
+        if scheduler_traces:
+            lines.extend(
+                f"- {summarize_tool_batch_trace(trace)}"
+                for trace in scheduler_traces[-limit:]
+            )
+        else:
+            lines.append("- 还没有调度批次。")
         return "\n".join(lines)
 
     def render_repl_header(self) -> str:
@@ -876,13 +886,27 @@ class AgentSession:
                 print("\n=== 任务结束 ===")
                 return True
 
+            if len(tool_calls) > 1 and hasattr(self.runtime, "describe_tool_batch"):
+                batch_summary = self.runtime.describe_tool_batch(tool_calls)
+                print(f"[scheduler] {batch_summary}")
+                self.log_activity("tool_batch", batch_summary)
+
             for tool_call in tool_calls:
                 print(pretty_tool_call(tool_call["name"], tool_call["args"]))
                 self.log_activity(
                     "tool_call",
                     pretty_tool_call(tool_call["name"], tool_call["args"]),
                 )
-                result = self.runtime.execute_tool(tool_call["name"], tool_call["args"])
+
+            if hasattr(self.runtime, "execute_tool_batch"):
+                results = self.runtime.execute_tool_batch(tool_calls)
+            else:
+                results = [
+                    self.runtime.execute_tool(tool_call["name"], tool_call["args"])
+                    for tool_call in tool_calls
+                ]
+
+            for tool_call, result in zip(tool_calls, results):
                 print(pretty_tool_result(result))
                 self.log_activity(
                     "tool_result",
